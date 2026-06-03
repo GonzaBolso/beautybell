@@ -32,7 +32,7 @@ class CajaView(VistaBase):
         self.contenido.rowconfigure(3, weight=1)
 
         boton_secundario(
-            self._acciones, "⬇  Exportar Excel",
+            self._acciones, "⬇  Exportar Excel Prueba",
             comando=self._exportar, ancho=160
         ).pack(side="right", padx=(8, 0))
         boton_primario(
