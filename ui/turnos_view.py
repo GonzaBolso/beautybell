@@ -99,10 +99,12 @@ class TurnosView(VistaBase):
 
         cab_sem = ctk.CTkFrame(self._panel_izq, fg_color="transparent")
         cab_sem.pack(fill="x", padx=12)
-        for d in ["Lu", "Ma", "Mi", "Ju", "Vi", "Sa", "Do"]:
-            ctk.CTkLabel(cab_sem, text=d, width=36, height=24,
+        for i in range(7):
+            cab_sem.columnconfigure(i, weight=1)
+        for i, d in enumerate(["Lu", "Ma", "Mi", "Ju", "Vi", "Sa", "Do"]):
+            ctk.CTkLabel(cab_sem, text=d, height=24,
                          font=FUENTES["small"],
-                         text_color=COLORES["texto_suave"]).pack(side="left", expand=True)
+                         text_color=COLORES["texto_suave"]).grid(row=0, column=i, sticky="ew")
 
         separador(self._panel_izq).pack(fill="x", padx=12, pady=4)
 
@@ -136,13 +138,16 @@ class TurnosView(VistaBase):
         cal = calendar.monthcalendar(self._mes_actual.year, self._mes_actual.month)
         hoy = date.today()
 
-        for semana in cal:
-            fila = ctk.CTkFrame(self._cal_frame, fg_color="transparent")
-            fila.pack(fill="x", pady=1)
-            for num_dia in semana:
+        # Usar grid para distribucion uniforme
+        for i in range(7):
+            self._cal_frame.columnconfigure(i, weight=1)
+
+        for fila_i, semana in enumerate(cal):
+            for col_i, num_dia in enumerate(semana):
                 if num_dia == 0:
-                    ctk.CTkFrame(fila, width=36, height=36,
-                                 fg_color="transparent").pack(side="left", expand=True)
+                    ctk.CTkLabel(self._cal_frame, text="", height=34,
+                                 fg_color="transparent",
+                                 ).grid(row=fila_i, column=col_i, sticky="ew", padx=1, pady=1)
                     continue
 
                 fecha_dia = date(self._mes_actual.year, self._mes_actual.month, num_dia)
@@ -156,16 +161,19 @@ class TurnosView(VistaBase):
                 elif es_hoy:
                     fg, tc = COLORES["rosa_suave"], COLORES["rosa"]
                 else:
-                    fg, tc = "transparent", COLORES["texto"]
+                    fg, tc = COLORES["fondo_card"], COLORES["texto"]
 
                 txt = str(num_dia) + (" •" if tiene and not es_sel else "")
-                ctk.CTkButton(
-                    fila, text=txt, width=36, height=36,
-                    fg_color=fg, hover_color=COLORES["rosa_suave"],
-                    text_color=tc, font=FUENTES["small"],
-                    corner_radius=18,
-                    command=lambda fd=fecha_dia: self._seleccionar_dia(fd),
-                ).pack(side="left", expand=True, padx=1)
+                lbl = ctk.CTkLabel(
+                    self._cal_frame, text=txt, height=34,
+                    fg_color=fg, text_color=tc,
+                    font=FUENTES["small"], corner_radius=17,
+                    cursor="hand2",
+                )
+                lbl.grid(row=fila_i, column=col_i, sticky="ew", padx=2, pady=2)
+                lbl.bind("<Enter>",    lambda e, w=lbl, sel=es_sel: w.configure(fg_color=COLORES["rosa_suave"]) if not sel else None)
+                lbl.bind("<Leave>",    lambda e, w=lbl, f=fg, sel=es_sel: w.configure(fg_color=f) if not sel else None)
+                lbl.bind("<Button-1>", lambda e, fd=fecha_dia: self._seleccionar_dia(fd))
 
     def _seleccionar_dia(self, fecha):
         self._fecha_sel = fecha
@@ -348,18 +356,31 @@ class _TarjetaTurno(ctk.CTkFrame):
                      fg_color=colores[0], text_color=colores[1],
                      corner_radius=6).pack(side="right")
 
-        # Fila 2: servicio + empleada + precio
+        # Fila 2: empleada + precio total
         fila2 = ctk.CTkFrame(cuerpo, fg_color="transparent")
         fila2.pack(fill="x", pady=(4, 0))
-        ctk.CTkLabel(fila2, text=turno["servicio_nombre"],
+        ctk.CTkLabel(fila2, text=turno["empleada_nombre"],
                      font=FUENTES["small"],
                      text_color=COLORES["texto_suave"]).pack(side="left")
-        ctk.CTkLabel(fila2, text="·  " + turno["empleada_nombre"],
-                     font=FUENTES["small"],
-                     text_color=COLORES["texto_suave"]).pack(side="left", padx=(8, 0))
-        ctk.CTkLabel(fila2, text="$" + str(int(turno["servicio_precio"])),
+        precio_total = turno.get("precio_total", 0)
+        ctk.CTkLabel(fila2, text="$" + str(int(precio_total)),
                      font=FUENTES["small"],
                      text_color=COLORES["texto"]).pack(side="right")
+
+        # Fila 3: lista de servicios
+        servicios = turno.get("servicios", [])
+        if servicios:
+            nombres_srv = ",  ".join(
+                s["servicio_nombre"] + " ($" + str(int(s["precio"])) + ")"
+                for s in servicios
+            )
+        else:
+            nombres_srv = turno.get("servicio_nombre") or "—"
+
+        ctk.CTkLabel(cuerpo, text=nombres_srv,
+                     font=FUENTES["small"],
+                     text_color=COLORES["texto_suave"],
+                     anchor="w", wraplength=400).pack(fill="x", pady=(2, 0))
 
         if turno["notas"]:
             ctk.CTkLabel(cuerpo, text=turno["notas"],
@@ -416,7 +437,7 @@ class _DialogCobro(ctk.CTkToplevel):
         self._al_cobrar     = al_cobrar
 
         self.title("Completar y cobrar turno")
-        self.geometry("400x330")
+        self.geometry("420x380")
         self.resizable(True, True)
         self.configure(fg_color=COLORES["fondo"])
 
@@ -442,7 +463,20 @@ class _DialogCobro(ctk.CTkToplevel):
         hora = turno["fecha_hora"][11:16]
         etiqueta(self, turno["cliente_nombre"] + "  -  " + hora,
                  fuente="subtitulo").pack(anchor="w", padx=20, pady=(16, 2))
-        etiqueta_suave(self, turno["servicio_nombre"]).pack(anchor="w", padx=20)
+
+        # Mostrar servicios
+        servicios = turno.get("servicios", [])
+        if servicios:
+            for s in servicios:
+                ctk.CTkLabel(
+                    self,
+                    text="• " + s["servicio_nombre"] + "  $" + str(int(s["precio"])),
+                    font=FUENTES["small"],
+                    text_color=COLORES["texto_suave"],
+                ).pack(anchor="w", padx=32)
+        else:
+            etiqueta_suave(self, turno.get("servicio_nombre", "")).pack(anchor="w", padx=20)
+
         separador(self).pack(fill="x", padx=20, pady=12)
 
         form = ctk.CTkFrame(self, fg_color="transparent")
@@ -451,7 +485,9 @@ class _DialogCobro(ctk.CTkToplevel):
 
         etiqueta_suave(form, "Monto ($)").grid(row=0, column=0, sticky="w", pady=8)
         self._monto = campo_texto(form, ancho=0)
-        self._monto.insert(0, str(int(turno["servicio_precio"])))
+        precio_total = turno.get("precio_total") or turno.get("servicio_precio") or 0
+        if precio_total:
+            self._monto.insert(0, str(int(precio_total)))
         self._monto.grid(row=0, column=1, sticky="ew", padx=(12, 0), pady=8)
 
         etiqueta_suave(form, "Metodo de pago").grid(row=1, column=0, sticky="w", pady=8)
@@ -467,30 +503,188 @@ class _DialogCobro(ctk.CTkToplevel):
         ).grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=8)
 
     def _confirmar(self):
+        import os, sqlite3
+        from datetime import datetime
+        from db.database import DB_PATH
+
+        def log(msg):
+            with open("beautybell_debug.log", "a", encoding="utf-8") as f:
+                f.write(datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " " + msg + "\n")
+
+        log("=== _confirmar iniciado ===")
+        log(f"DB_PATH={DB_PATH}, existe={os.path.exists(DB_PATH)}")
+
+        conn_check = sqlite3.connect(DB_PATH)
+        count_antes = conn_check.execute("SELECT COUNT(*) FROM caja_movimientos").fetchone()[0]
+        conn_check.close()
+        log(f"movimientos en caja ANTES: {count_antes}")
+        log(f"turno id={self._turno.get('id')} cliente={self._turno.get('cliente_nombre')}")
+        log(f"precio_total={self._turno.get('precio_total')}")
+        log(f"campo monto raw={repr(self._monto.get())}")
+        log(f"metodo pago={self._var_mp.get()}, mp_id={self._metodos_map.get(self._var_mp.get())}")
+
         try:
             monto = float(self._monto.get().strip())
+            log(f"monto parseado={monto}")
         except ValueError:
+            log(f"ERROR: ValueError al parsear monto: {repr(self._monto.get())}")
+            self.grab_release()
             mostrar_error("Error", "El monto debe ser un numero.")
             return
 
+        if monto <= 0:
+            log(f"ERROR: monto <= 0: {monto}")
+            self.grab_release()
+            mostrar_error("Error", "El monto debe ser mayor a cero.")
+            return
+
+        servicios = self._turno.get("servicios", [])
+        nombres_srv = ", ".join(s["servicio_nombre"] for s in servicios) if servicios else (self._turno.get("servicio_nombre") or "")
         mp_id = self._metodos_map.get(self._var_mp.get())
-        self._turno_service.completar(self._turno["id"])
-        self._caja_service.registrar_cobro_turno(
+        log(f"nombres_srv={nombres_srv}, mp_id={mp_id}")
+
+        ok, msg = self._turno_service.completar(self._turno["id"])
+        log(f"completar -> ok={ok} msg={msg}")
+        if not ok:
+            self.grab_release()
+            mostrar_error("Error al completar", msg)
+            return
+
+        ok, msg, caja_id = self._caja_service.registrar_cobro_turno(
             turno_id=self._turno["id"],
             monto=monto,
             metodo_pago_id=mp_id,
+            fecha=datetime.now().strftime("%Y-%m-%d"),
             descripcion="Cobro: " + self._turno["cliente_nombre"]
-                        + " - " + self._turno["servicio_nombre"]
+                        + " - " + nombres_srv
                         + " - " + self._turno["empleada_nombre"],
         )
-        mostrar_exito("Listo", "Turno completado y cobro registrado en caja.")
+        log(f"registrar_cobro_turno -> ok={ok} msg={msg} caja_id={caja_id}")
+        if not ok:
+            self.grab_release()
+            mostrar_error("Error al registrar en caja", msg)
+            return
+
+        # Verificar en la DB directamente
+        conn_check = sqlite3.connect(DB_PATH)
+        count_despues = conn_check.execute("SELECT COUNT(*) FROM caja_movimientos").fetchone()[0]
+        ultimo = conn_check.execute("SELECT id, fecha, monto, turno_id FROM caja_movimientos ORDER BY id DESC LIMIT 1").fetchone()
+        conn_check.close()
+        log(f"movimientos DESPUES: {count_despues}, ultimo: {tuple(ultimo) if ultimo else None}")
+
+        self.grab_release()
         self.destroy()
+        mostrar_exito("Listo", "Turno completado y cobro registrado en caja.")
         if self._al_cobrar:
             self._al_cobrar()
 
 
 # ------------------------------------------------------------------ #
-#  Formulario turno                                                    #
+#  Widget buscador con dropdown                                        #
+# ------------------------------------------------------------------ #
+
+class _BuscadorConDropdown(ctk.CTkFrame):
+    """
+    Entry con dropdown de sugerencias filtradas por lo que escribe el usuario.
+    al_seleccionar(nombre) se llama cuando elige una opcion.
+    """
+
+    def __init__(self, parent, opciones: list[str], placeholder="", ancho=444, **kwargs):
+        super().__init__(parent, fg_color="transparent", corner_radius=0)
+        self._opciones = opciones
+        self._popup    = None
+        self._ignorar_cambio = False
+
+        self._var = ctk.StringVar()
+        self._entry = ctk.CTkEntry(
+            self,
+            textvariable=self._var,
+            placeholder_text=placeholder,
+            width=ancho, height=36,
+            fg_color=COLORES["fondo_input"],
+            border_color=COLORES["borde"],
+            text_color=COLORES["texto"],
+            placeholder_text_color=COLORES["texto_suave"],
+            corner_radius=8,
+            font=FUENTES["normal"],
+        )
+        self._entry.pack(fill="x")
+        self._var.trace_add("write", self._on_cambio)
+        self._entry.bind("<FocusOut>", lambda _: self.after(150, self._cerrar_popup))
+        self._entry.bind("<Escape>",   lambda _: self._cerrar_popup())
+        self._entry.bind("<Down>",     lambda _: self._foco_popup())
+
+    def get(self) -> str:
+        return self._var.get()
+
+    def set(self, valor: str):
+        self._ignorar_cambio = True
+        self._var.set(valor)
+        self._ignorar_cambio = False
+
+    def _on_cambio(self, *_):
+        if self._ignorar_cambio:
+            return
+        texto = self._var.get().strip().lower()
+        if not texto:
+            self._cerrar_popup()
+            return
+        coincidencias = [o for o in self._opciones if texto in o.lower()]
+        if coincidencias:
+            self._mostrar_popup(coincidencias)
+        else:
+            self._cerrar_popup()
+
+    def _mostrar_popup(self, opciones: list[str]):
+        self._cerrar_popup()
+        root = self._entry.winfo_toplevel()
+        self._popup = ctk.CTkToplevel(root)
+        self._popup.overrideredirect(True)
+        self._popup.attributes("-topmost", True)
+        self._entry.update_idletasks()
+        x = self._entry.winfo_rootx()
+        y = self._entry.winfo_rooty() + self._entry.winfo_height() + 2
+        ancho = self._entry.winfo_width()
+        alto  = min(len(opciones) * 36, 200)
+        self._popup.geometry(f"{ancho}x{alto}+{x}+{y}")
+        self._popup.configure(fg_color=COLORES["fondo_card"])
+
+        scroll = ctk.CTkScrollableFrame(self._popup, fg_color="transparent",
+                                        scrollbar_button_color=COLORES["rosa"])
+        scroll.pack(fill="both", expand=True)
+
+        for op in opciones:
+            ctk.CTkButton(
+                scroll, text=op, anchor="w", height=34,
+                fg_color="transparent", hover_color=COLORES["rosa_suave"],
+                text_color=COLORES["texto"], font=FUENTES["normal"],
+                corner_radius=0,
+                command=lambda v=op: self._seleccionar(v),
+            ).pack(fill="x")
+
+    def _seleccionar(self, valor: str):
+        self.set(valor)
+        self._cerrar_popup()
+        self._entry.focus_set()
+
+    def _foco_popup(self):
+        if self._popup:
+            try:
+                self._popup.focus_set()
+            except Exception:
+                pass
+
+    def _cerrar_popup(self):
+        if self._popup:
+            try:
+                self._popup.destroy()
+            except Exception:
+                pass
+            self._popup = None
+
+
+# ------------------------------------------------------------------ #
+#  Formulario turno — con multiples servicios                          #
 # ------------------------------------------------------------------ #
 
 class _FormTurno(ctk.CTkToplevel):
@@ -505,16 +699,21 @@ class _FormTurno(ctk.CTkToplevel):
         self._fecha_inicial = fecha_inicial or date.today()
         self._al_guardar    = al_guardar
         self._es_edicion    = turno is not None
+        # Lista de filas de servicio: cada item es dict {frame, var_srv, e_precio}
+        self._filas_servicios = []
 
         self.title("Editar turno" if self._es_edicion else "Nuevo turno")
-        self.geometry("460x620")
-        self.minsize(400, 560)
+        self.geometry("500x680")
+        self.minsize(460, 600)
         self.resizable(True, True)
         self.configure(fg_color=COLORES["fondo"])
         self._cargar_datos()
         self._construir()
         if self._es_edicion:
             self._rellenar()
+        else:
+            # Agregar primera fila de servicio vacia
+            self._agregar_fila_servicio()
         self.after(100, self._forzar_foco)
 
     def _forzar_foco(self):
@@ -526,15 +725,15 @@ class _FormTurno(ctk.CTkToplevel):
         clientes  = self._cli_service.obtener_todos()
         empleadas = self._cfg_service.obtener_empleadas()
         servicios = self._cfg_service.obtener_servicios()
-        self._clientes_map  = {c["nombre"]: c["id"] for c in clientes}
-        self._empleadas_map = {e["nombre"]: e["id"] for e in empleadas if e["activa"]}
-        self._servicios_map = {s["nombre"]: s["id"] for s in servicios if s["activo"]}
+        self._clientes_map   = {c["nombre"]: c["id"] for c in clientes}
+        self._empleadas_map  = {e["nombre"]: e["id"] for e in empleadas if e["activa"]}
+        self._servicios_map  = {s["nombre"]: s["id"] for s in servicios if s["activo"]}
         self._servicios_precio = {s["nombre"]: s["precio"] for s in servicios if s["activo"]}
+        self._servicios_nombres = list(self._servicios_map.keys())
 
     def _construir(self):
         pad = {"padx": 28, "pady": 5}
 
-        # Botones arriba
         btns = ctk.CTkFrame(self, fg_color=COLORES["fondo_card"], corner_radius=0)
         btns.pack(fill="x")
         boton_secundario(btns, "Cancelar", comando=self.destroy, ancho=160).pack(
@@ -543,61 +742,58 @@ class _FormTurno(ctk.CTkToplevel):
             side="right", padx=28, pady=12)
         separador(self).pack(fill="x")
 
-        # Scroll para el contenido
-        scroll = ctk.CTkScrollableFrame(
+        self._scroll = ctk.CTkScrollableFrame(
             self, fg_color="transparent",
             scrollbar_button_color=COLORES["rosa"],
             scrollbar_button_hover_color=COLORES["rosa_hover"],
         )
-        scroll.pack(fill="both", expand=True)
-        scroll.columnconfigure(0, weight=1)
+        self._scroll.pack(fill="both", expand=True)
+        self._scroll.columnconfigure(0, weight=1)
 
         # Cliente
-        etiqueta_suave(scroll, "Cliente *").pack(anchor="w", padx=28, pady=(14, 2))
-        self._var_cli = ctk.StringVar()
-        self._combo_cli = ctk.CTkComboBox(
-            scroll, values=list(self._clientes_map.keys()),
-            variable=self._var_cli, width=404, height=36,
-            fg_color=COLORES["fondo_input"], border_color=COLORES["borde"],
-            button_color=COLORES["rosa"], button_hover_color=COLORES["rosa_hover"],
-            text_color=COLORES["texto"], font=FUENTES["normal"], corner_radius=8,
+        etiqueta_suave(self._scroll, "Cliente *").pack(anchor="w", padx=28, pady=(14, 2))
+        self._buscador_cli = _BuscadorConDropdown(
+            self._scroll,
+            opciones=list(self._clientes_map.keys()),
+            placeholder="Buscar cliente...",
+            ancho=444,
         )
-        self._combo_cli.pack(**pad)
+        self._buscador_cli.pack(padx=28, pady=5)
 
         # Empleada
-        etiqueta_suave(scroll, "Empleada *").pack(anchor="w", padx=28, pady=(8, 2))
+        etiqueta_suave(self._scroll, "Empleada *").pack(anchor="w", padx=28, pady=(8, 2))
         self._var_emp = ctk.StringVar()
         self._combo_emp = ctk.CTkComboBox(
-            scroll, values=list(self._empleadas_map.keys()),
-            variable=self._var_emp, width=404, height=36,
+            self._scroll, values=list(self._empleadas_map.keys()),
+            variable=self._var_emp, width=444, height=36,
             fg_color=COLORES["fondo_input"], border_color=COLORES["borde"],
             button_color=COLORES["rosa"], button_hover_color=COLORES["rosa_hover"],
             text_color=COLORES["texto"], font=FUENTES["normal"], corner_radius=8,
         )
         self._combo_emp.pack(**pad)
 
-        # Servicio — al cambiar autocompleta precio
-        etiqueta_suave(scroll, "Servicio *").pack(anchor="w", padx=28, pady=(8, 2))
-        self._var_srv = ctk.StringVar()
-        self._var_srv.trace_add("write", self._al_cambiar_servicio)
-        self._combo_srv = ctk.CTkComboBox(
-            scroll, values=list(self._servicios_map.keys()),
-            variable=self._var_srv, width=404, height=36,
-            fg_color=COLORES["fondo_input"], border_color=COLORES["borde"],
-            button_color=COLORES["rosa"], button_hover_color=COLORES["rosa_hover"],
-            text_color=COLORES["texto"], font=FUENTES["normal"], corner_radius=8,
+        # Servicios (dinamico)
+        etiqueta_suave(self._scroll, "Servicios *").pack(anchor="w", padx=28, pady=(8, 2))
+
+        self._frame_servicios = ctk.CTkFrame(self._scroll, fg_color="transparent")
+        self._frame_servicios.pack(fill="x", padx=28)
+        self._frame_servicios.columnconfigure(0, weight=1)
+
+        boton_secundario(
+            self._scroll, "+ Agregar servicio",
+            comando=self._agregar_fila_servicio, ancho=200,
+        ).pack(anchor="w", padx=28, pady=(4, 0))
+
+        # Total dinamico
+        self._lbl_total = ctk.CTkLabel(
+            self._scroll, text="Total: $0",
+            font=FUENTES["subtitulo"], text_color=COLORES["rosa"], anchor="w",
         )
-        self._combo_srv.pack(**pad)
+        self._lbl_total.pack(anchor="w", padx=28, pady=(4, 0))
 
-        # Precio editable
-        etiqueta_suave(scroll, "Precio ($)  — editable si hubo descuento").pack(
-            anchor="w", padx=28, pady=(8, 2))
-        self._precio = campo_texto(scroll, placeholder="0", ancho=404)
-        self._precio.pack(**pad)
-
-        # Fecha y hora precargadas
-        etiqueta_suave(scroll, "Fecha (YYYY-MM-DD)").pack(anchor="w", padx=28, pady=(8, 2))
-        fila_dt = ctk.CTkFrame(scroll, fg_color="transparent")
+        # Fecha y hora
+        etiqueta_suave(self._scroll, "Fecha (YYYY-MM-DD)").pack(anchor="w", padx=28, pady=(8, 2))
+        fila_dt = ctk.CTkFrame(self._scroll, fg_color="transparent")
         fila_dt.pack(**pad)
 
         self._fecha = campo_texto(fila_dt, ancho=230)
@@ -612,11 +808,11 @@ class _FormTurno(ctk.CTkToplevel):
         # Estado (solo edicion)
         self._var_estado = ctk.StringVar(value="pendiente")
         if self._es_edicion:
-            etiqueta_suave(scroll, "Estado").pack(anchor="w", padx=28, pady=(8, 2))
+            etiqueta_suave(self._scroll, "Estado").pack(anchor="w", padx=28, pady=(8, 2))
             ctk.CTkOptionMenu(
-                scroll, values=TurnoService.ESTADOS,
+                self._scroll, values=TurnoService.ESTADOS,
                 variable=self._var_estado,
-                width=404, height=36,
+                width=444, height=36,
                 fg_color=COLORES["rosa"], button_color=COLORES["rosa_hover"],
                 button_hover_color=COLORES["rosa_hover"],
                 text_color=COLORES["texto_blanco"],
@@ -624,39 +820,114 @@ class _FormTurno(ctk.CTkToplevel):
             ).pack(**pad)
 
         # Notas
-        etiqueta_suave(scroll, "Notas").pack(anchor="w", padx=28, pady=(8, 2))
+        etiqueta_suave(self._scroll, "Notas").pack(anchor="w", padx=28, pady=(8, 2))
         self._notas = ctk.CTkTextbox(
-            scroll, width=404, height=80,
+            self._scroll, width=444, height=80,
             fg_color=COLORES["fondo_input"], border_color=COLORES["borde"],
             border_width=2, text_color=COLORES["texto"],
             font=FUENTES["normal"], corner_radius=8,
         )
         self._notas.pack(padx=28, pady=(0, 20))
 
-    def _al_cambiar_servicio(self, *_):
-        nombre = self._var_srv.get()
-        if nombre in self._servicios_precio:
-            precio = self._servicios_precio[nombre]
-            self._precio.delete(0, "end")
-            self._precio.insert(0, str(int(precio)))
+    def _agregar_fila_servicio(self, servicio_nombre="", precio_val=""):
+        fila = ctk.CTkFrame(self._frame_servicios, fg_color=COLORES["rosa_suave"],
+                            corner_radius=8)
+        fila.pack(fill="x", pady=3)
+        fila.columnconfigure(0, weight=2)
+        fila.columnconfigure(1, weight=1)
+
+        var_srv = ctk.StringVar(value=servicio_nombre)
+
+        def _al_cambiar_srv(*_):
+            nombre = var_srv.get()
+            if nombre in self._servicios_precio:
+                p = self._servicios_precio[nombre]
+                e_precio.delete(0, "end")
+                e_precio.insert(0, str(int(p)))
+            self._actualizar_total()
+
+        var_srv.trace_add("write", _al_cambiar_srv)
+
+        buscador = _BuscadorConDropdown(
+            fila,
+            opciones=self._servicios_nombres,
+            placeholder="Buscar servicio...",
+            ancho=0,
+        )
+        buscador.grid(row=0, column=0, sticky="ew", padx=(8, 4), pady=6)
+        # Sincronizar var_srv con el buscador
+        buscador._var = var_srv
+        buscador._entry.configure(textvariable=var_srv)
+        if servicio_nombre:
+            buscador.set(servicio_nombre)
+
+        e_precio = campo_texto(fila, placeholder="$", ancho=0)
+        if precio_val:
+            e_precio.insert(0, str(precio_val))
+        e_precio.grid(row=0, column=1, sticky="ew", padx=(0, 4), pady=6)
+        e_precio.bind("<KeyRelease>", lambda _: self._actualizar_total())
+
+        btn_quitar = ctk.CTkButton(
+            fila, text="✕", width=28, height=28,
+            fg_color="transparent", hover_color="#FDECEA",
+            text_color=COLORES["error"], font=FUENTES["normal"],
+            corner_radius=6,
+        )
+        btn_quitar.grid(row=0, column=2, padx=(0, 6), pady=6)
+
+        info = {"frame": fila, "var_srv": var_srv, "e_precio": e_precio}
+        self._filas_servicios.append(info)
+
+        def _quitar(i=info):
+            if len(self._filas_servicios) <= 1:
+                mostrar_error("Error", "Debe haber al menos un servicio.")
+                return
+            i["frame"].destroy()
+            self._filas_servicios.remove(i)
+            self._actualizar_total()
+
+        btn_quitar.configure(command=_quitar)
+        self._actualizar_total()
+
+    def _actualizar_total(self):
+        total = 0.0
+        for info in self._filas_servicios:
+            try:
+                total += float(info["e_precio"].get().strip() or 0)
+            except ValueError:
+                pass
+        self._lbl_total.configure(text="Total: $" + str(int(total)))
 
     def _rellenar(self):
         t = self._turno
         for nombre, id_ in self._clientes_map.items():
             if id_ == t["cliente_id"]:
-                self._var_cli.set(nombre)
+                self._buscador_cli.set(nombre)
                 break
         for nombre, id_ in self._empleadas_map.items():
             if id_ == t["empleada_id"]:
                 self._var_emp.set(nombre)
                 break
-        for nombre, id_ in self._servicios_map.items():
-            if id_ == t["servicio_id"]:
-                self._var_srv.set(nombre)
-                break
-        # Precio del turno (del servicio actual)
-        self._precio.delete(0, "end")
-        self._precio.insert(0, str(int(t["servicio_precio"])))
+
+        # Cargar servicios del turno
+        servicios = t.get("servicios", [])
+        if servicios:
+            for s in servicios:
+                # Encontrar nombre por id
+                nombre_srv = ""
+                for n, sid in self._servicios_map.items():
+                    if sid == s["servicio_id"]:
+                        nombre_srv = n
+                        break
+                self._agregar_fila_servicio(nombre_srv, int(s["precio"]))
+        else:
+            # Fallback: un solo servicio desde campo legacy
+            nombre_srv = ""
+            for n, sid in self._servicios_map.items():
+                if sid == t.get("servicio_id"):
+                    nombre_srv = n
+                    break
+            self._agregar_fila_servicio(nombre_srv, int(t.get("servicio_precio", 0)))
 
         fh = t["fecha_hora"]
         self._fecha.delete(0, "end")
@@ -669,9 +940,8 @@ class _FormTurno(ctk.CTkToplevel):
             self._notas.insert("1.0", t["notas"])
 
     def _guardar(self):
-        nombre_cli = self._var_cli.get().strip()
+        nombre_cli = self._buscador_cli.get().strip()
         nombre_emp = self._var_emp.get().strip()
-        nombre_srv = self._var_srv.get().strip()
         fecha_txt  = self._fecha.get().strip()
         hora_txt   = self._hora.get().strip()
         notas      = self._notas.get("1.0", "end").strip()
@@ -682,31 +952,48 @@ class _FormTurno(ctk.CTkToplevel):
         if not nombre_emp or nombre_emp not in self._empleadas_map:
             mostrar_error("Error", "Selecciona una empleada valida.")
             return
-        if not nombre_srv or nombre_srv not in self._servicios_map:
-            mostrar_error("Error", "Selecciona un servicio valido.")
-            return
         if not hora_txt:
             mostrar_error("Error", "Ingresa la hora (HH:MM).")
+            return
+
+        # Recolectar servicios
+        servicios = []
+        for info in self._filas_servicios:
+            nombre_srv = info["var_srv"].get().strip()
+            if not nombre_srv or nombre_srv not in self._servicios_map:
+                mostrar_error("Error", "Selecciona un servicio valido en cada fila.")
+                return
+            try:
+                precio = float(info["e_precio"].get().strip() or 0)
+            except ValueError:
+                mostrar_error("Error", "El precio debe ser un numero.")
+                return
+            servicios.append({
+                "servicio_id": self._servicios_map[nombre_srv],
+                "precio": precio,
+            })
+
+        if not servicios:
+            mostrar_error("Error", "Agrega al menos un servicio.")
             return
 
         fecha_hora = fecha_txt + " " + hora_txt
         cli_id = self._clientes_map[nombre_cli]
         emp_id = self._empleadas_map[nombre_emp]
-        srv_id = self._servicios_map[nombre_srv]
 
         if self._es_edicion:
             ok, msg = self._turno_service.actualizar(
-                self._turno["id"], cli_id, emp_id, srv_id,
+                self._turno["id"], cli_id, emp_id, servicios,
                 fecha_hora, self._var_estado.get(), notas)
             resultado = ok
         else:
             ok, msg, resultado = self._turno_service.crear(
-                cli_id, emp_id, srv_id, fecha_hora, notas)
+                cli_id, emp_id, servicios, fecha_hora, notas)
 
         if not ok and resultado == -1:
             if confirmar("Turno solapado", msg):
                 ok, msg, resultado = self._turno_service.crear(
-                    cli_id, emp_id, srv_id, fecha_hora, notas, forzar=True)
+                    cli_id, emp_id, servicios, fecha_hora, notas, forzar=True)
             else:
                 return
 

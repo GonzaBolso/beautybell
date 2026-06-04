@@ -4,11 +4,6 @@ from repository.servicio_repo import ServicioRepo
 
 
 class TurnoService:
-    """
-    Lógica de negocio para turnos.
-    Valida conflictos de horario, estados y reglas del negocio.
-    La UI nunca toca el repo directamente.
-    """
 
     ESTADOS = ["pendiente", "confirmado", "completado", "cancelado"]
 
@@ -21,7 +16,6 @@ class TurnoService:
     # ------------------------------------------------------------------ #
 
     def obtener_por_fecha(self, fecha: str) -> list:
-        """fecha: 'YYYY-MM-DD'"""
         return self._repo.obtener_por_fecha(fecha)
 
     def obtener_por_rango(self, fecha_desde: str, fecha_hasta: str) -> list:
@@ -38,48 +32,56 @@ class TurnoService:
     #  Crear / editar                                                      #
     # ------------------------------------------------------------------ #
 
-    def crear(self, cliente_id: int, empleada_id: int, servicio_id: int,
+    def crear(self, cliente_id: int, empleada_id: int,
+              servicios: list,           # [{servicio_id, precio}, ...]
               fecha_hora: str, notas: str = "",
               forzar: bool = False) -> tuple[bool, str, int | None]:
         """
-        Retorna (ok, mensaje, turno_id).
-        - ok=True  → turno creado.
-        - ok=False, turno_id=None → error de validación duro (fecha inválida, etc).
-        - ok=False, turno_id=-1  → hay solapamiento pero se puede forzar.
-          La UI debe preguntar al usuario y reintentar con forzar=True.
+        servicios: lista de dicts {servicio_id, precio}.
+        El primer servicio se usa como referencia para la duracion en la validacion.
         """
-        ok, msg, solapamiento = self._validar(empleada_id, servicio_id, fecha_hora)
+        if not servicios:
+            return False, "Debes agregar al menos un servicio.", None
+
+        primer_srv_id = servicios[0]["servicio_id"]
+        ok, msg, solapamiento = self._validar(empleada_id, primer_srv_id, fecha_hora)
         if not ok:
             if solapamiento and not forzar:
-                return False, msg, -1   # -1 = señal de "preguntar al usuario"
+                return False, msg, -1
             elif solapamiento and forzar:
-                pass                    # el usuario confirmó, seguimos igual
+                pass
             else:
-                return False, msg, None # error duro, no se puede forzar
+                return False, msg, None
 
         turno_id = self._repo.crear(
             cliente_id=cliente_id,
             empleada_id=empleada_id,
-            servicio_id=servicio_id,
+            servicio_id=primer_srv_id,   # campo legacy
             fecha_hora=fecha_hora,
             notas=notas
         )
+        self._repo.guardar_servicios(turno_id, servicios)
         return True, "Turno creado correctamente.", turno_id
 
-    def actualizar(self, id: int, cliente_id: int, empleada_id: int, servicio_id: int,
+    def actualizar(self, id: int, cliente_id: int, empleada_id: int,
+                   servicios: list,       # [{servicio_id, precio}, ...]
                    fecha_hora: str, estado: str, notas: str = "",
                    forzar: bool = False) -> tuple[bool, str]:
         if estado not in self.ESTADOS:
             return False, f"Estado inválido: {estado}"
+        if not servicios:
+            return False, "Debes agregar al menos un servicio."
 
-        ok, msg, solapamiento = self._validar(empleada_id, servicio_id, fecha_hora, excluir_id=id)
+        primer_srv_id = servicios[0]["servicio_id"]
+        ok, msg, solapamiento = self._validar(empleada_id, primer_srv_id, fecha_hora, excluir_id=id)
         if not ok:
             if solapamiento and not forzar:
-                return False, msg       # la UI pregunta y reintenta con forzar=True
+                return False, msg
             elif not solapamiento:
                 return False, msg
 
-        self._repo.actualizar(id, cliente_id, empleada_id, servicio_id, fecha_hora, estado, notas)
+        self._repo.actualizar(id, cliente_id, empleada_id, primer_srv_id, fecha_hora, estado, notas)
+        self._repo.guardar_servicios(id, servicios)
         return True, "Turno actualizado correctamente."
 
     def cambiar_estado(self, id: int, estado: str) -> tuple[bool, str]:
@@ -103,8 +105,6 @@ class TurnoService:
 
     def _validar(self, empleada_id: int, servicio_id: int,
                  fecha_hora: str, excluir_id: int = None) -> tuple[bool, str, bool]:
-        """Retorna (ok, mensaje, es_solapamiento)."""
-
         try:
             datetime.strptime(fecha_hora, "%Y-%m-%d %H:%M")
         except ValueError:
@@ -130,47 +130,3 @@ class TurnoService:
             ), True
 
         return True, "", False
-
-    # ------------------------------------------------------------------ #
-    #  Helpers para la UI                                                  #
-    # ------------------------------------------------------------------ #
-
-    def horarios_disponibles(self, fecha: str, empleada_id: int,
-                             duracion_min: int, hora_inicio: str = "09:00",
-                             hora_fin: str = "20:00", intervalo_min: int = 30) -> list[str]:
-        """
-        Devuelve lista de horarios libres en formato 'HH:MM' para una fecha y empleada.
-        Útil para mostrar un selector de horas en la UI.
-        """
-        from datetime import timedelta
-
-        turnos_del_dia = self._repo.obtener_por_fecha(fecha)
-        ocupados = [
-            (t["fecha_hora"][11:16], t["duracion_min"] if "duracion_min" in t.keys() else 60)
-            for t in turnos_del_dia
-            if t["empleada_id"] == empleada_id and t["estado"] != "cancelado"
-        ]
-
-        inicio = datetime.strptime(f"{fecha} {hora_inicio}", "%Y-%m-%d %H:%M")
-        fin    = datetime.strptime(f"{fecha} {hora_fin}",    "%Y-%m-%d %H:%M")
-        delta  = timedelta(minutes=intervalo_min)
-
-        libres = []
-        slot = inicio
-        while slot + timedelta(minutes=duracion_min) <= fin:
-            hora_str = slot.strftime("%H:%M")
-            slot_fin = slot + timedelta(minutes=duracion_min)
-
-            solapado = False
-            for hora_oc, dur_oc in ocupados:
-                oc_inicio = datetime.strptime(f"{fecha} {hora_oc}", "%Y-%m-%d %H:%M")
-                oc_fin    = oc_inicio + timedelta(minutes=dur_oc)
-                if slot < oc_fin and slot_fin > oc_inicio:
-                    solapado = True
-                    break
-
-            if not solapado:
-                libres.append(hora_str)
-            slot += delta
-
-        return libres

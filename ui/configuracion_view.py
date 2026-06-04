@@ -156,10 +156,6 @@ class _PanelBase(ctk.CTkFrame):
 # ------------------------------------------------------------------ #
 
 class _CampoConSugerencias(ctk.CTkFrame):
-    """
-    Entry que muestra un pequeño dropdown con sugerencias
-    basadas en los valores ya existentes.
-    """
 
     def __init__(self, parent, sugerencias: list[str], placeholder="", **kwargs):
         super().__init__(parent, fg_color="transparent", corner_radius=0)
@@ -206,20 +202,16 @@ class _CampoConSugerencias(ctk.CTkFrame):
 
     def _mostrar_popup(self, opciones: list[str]):
         self._cerrar_popup()
-        # Buscar la ventana toplevel raiz
         root = self._entry.winfo_toplevel()
         self._popup = ctk.CTkToplevel(root)
         self._popup.overrideredirect(True)
         self._popup.attributes("-topmost", True)
-
-        # Posicion debajo del entry
         self._entry.update_idletasks()
         x = self._entry.winfo_rootx()
         y = self._entry.winfo_rooty() + self._entry.winfo_height() + 2
         ancho = self._entry.winfo_width()
         self._popup.geometry(f"{ancho}x{min(len(opciones)*36, 180)}+{x}+{y}")
         self._popup.configure(fg_color=COLORES["fondo_card"])
-
         for op in opciones[:6]:
             btn = ctk.CTkButton(
                 self._popup, text=op, anchor="w", height=34,
@@ -244,12 +236,16 @@ class _CampoConSugerencias(ctk.CTkFrame):
 
 
 # ------------------------------------------------------------------ #
-#  Panel Servicios                                                     #
+#  Panel Servicios — con categorias colapsables                        #
 # ------------------------------------------------------------------ #
 
 class _PanelServicios(_PanelBase):
 
     TITULO_NUEVO = "Nuevo servicio"
+
+    def __init__(self, parent, service):
+        self._colapsado = {}
+        super().__init__(parent, service)
 
     def _cargar(self, seleccionar_id=None):
         for w in self._lista.winfo_children():
@@ -259,34 +255,57 @@ class _PanelServicios(_PanelBase):
             etiqueta_suave(self._lista, "Sin servicios").pack(pady=12)
             return
 
-        # Agrupar por categoría
+        # Agrupar por categoria
         grupos: dict[str, list] = {}
         for s in servicios:
             cat = s["categoria"] or "Sin categoría"
             grupos.setdefault(cat, []).append(s)
 
         for cat, items in sorted(grupos.items()):
-            # Encabezado de categoría
-            ctk.CTkLabel(
-                self._lista,
-                text=cat.upper(),
+            colapsado = self._colapsado.get(cat, False)
+
+            # Encabezado clickeable
+            enc_frame = ctk.CTkFrame(self._lista, fg_color="transparent", cursor="hand2")
+            enc_frame.pack(fill="x", padx=10, pady=(10, 2))
+            enc_frame.columnconfigure(0, weight=1)
+
+            flecha = "▶" if colapsado else "▼"
+            lbl_cat = ctk.CTkLabel(
+                enc_frame,
+                text=flecha + "  " + cat.upper(),
                 font=FUENTES["small"],
                 text_color=COLORES["rosa"],
                 anchor="w",
-            ).pack(fill="x", padx=10, pady=(10, 2))
+                cursor="hand2",
+            )
+            lbl_cat.grid(row=0, column=0, sticky="ew")
+
             ctk.CTkFrame(
                 self._lista, height=1, fg_color=COLORES["rosa_suave"]
             ).pack(fill="x", padx=10, pady=(0, 4))
 
+            items_frame = ctk.CTkFrame(self._lista, fg_color="transparent")
+            items_frame.columnconfigure(0, weight=1)
+
+            if not colapsado:
+                items_frame.pack(fill="x")
+
             for s in items:
                 _ItemToggle(
-                    self._lista, item=s,
+                    items_frame, item=s,
                     linea1=s["nombre"],
                     linea2="$" + str(int(s["precio"])) + "  -  " + str(s["duracion_min"]) + " min",
                     activo=bool(s["activo"]),
                     seleccionado=(seleccionar_id is not None and s["id"] == seleccionar_id),
                     al_seleccionar=self._item_seleccionado,
                 ).pack(fill="x", padx=4, pady=2)
+
+            def _toggle(c=cat):
+                self._colapsado[c] = not self._colapsado.get(c, False)
+                self._cargar(seleccionar_id=self._seleccionado["id"] if self._seleccionado else None)
+
+            enc_frame.bind("<Button-1>", lambda _e, t=_toggle: t())
+            lbl_cat.bind("<Button-1>", lambda _e, t=_toggle: t())
 
     def _mostrar_form(self, servicio):
         for w in self._panel_form.winfo_children():
@@ -302,7 +321,6 @@ class _PanelServicios(_PanelBase):
         form.pack(fill="x", padx=20)
         form.columnconfigure(1, weight=1)
 
-        # Categoría con sugerencias
         cats_existentes = self._service.obtener_categorias_servicios()
         etiqueta_suave(form, "Categoría").grid(row=0, column=0, sticky="w", pady=8)
         e_cat = _CampoConSugerencias(form, sugerencias=cats_existentes,

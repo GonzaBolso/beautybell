@@ -18,10 +18,6 @@ CATEGORIAS_EGRESO = [
 
 
 class CajaService:
-    """
-    Lógica de negocio para caja.
-    Registra ingresos y egresos, calcula saldos y prepara datos para exportar.
-    """
 
     def __init__(self):
         self._repo = CajaRepo()
@@ -40,6 +36,9 @@ class CajaService:
     def obtener_por_rango(self, fecha_desde: str, fecha_hasta: str) -> list:
         return self._repo.obtener_por_rango(fecha_desde, fecha_hasta)
 
+    def obtener_por_id(self, id_: int):
+        return self._repo.obtener_por_id(id_)
+
     def saldo_hoy(self) -> float:
         hoy = datetime.now().strftime("%Y-%m-%d")
         return self._repo.saldo_hasta(hoy)
@@ -48,16 +47,6 @@ class CajaService:
         return self._repo.saldo_hasta(fecha)
 
     def resumen_por_rango(self, fecha_desde: str, fecha_hasta: str) -> dict:
-        """
-        Devuelve totales agrupados para mostrar en la UI o exportar.
-        {
-            'total_ingresos': float,
-            'total_egresos': float,
-            'saldo': float,
-            'por_categoria': { 'Servicio': 5000.0, ... },
-            'por_metodo_pago': { 'Efectivo': 3000.0, ... },
-        }
-        """
         movimientos = self._repo.obtener_por_rango(fecha_desde, fecha_hasta)
 
         total_ingresos = 0.0
@@ -87,7 +76,7 @@ class CajaService:
         }
 
     # ------------------------------------------------------------------ #
-    #  Registrar movimientos                                               #
+    #  Registrar / editar movimientos                                      #
     # ------------------------------------------------------------------ #
 
     def registrar_ingreso(self, categoria: str, monto: float,
@@ -133,15 +122,25 @@ class CajaService:
         return True, "Egreso registrado.", id_
 
     def registrar_cobro_turno(self, turno_id: int, monto: float,
-                              metodo_pago_id: int, descripcion: str = "") -> tuple[bool, str, int | None]:
-        """Atajo para registrar el cobro de un turno completado."""
+                              metodo_pago_id: int, descripcion: str = "",
+                              fecha: str = None) -> tuple[bool, str, int | None]:
         return self.registrar_ingreso(
             categoria="Servicio",
             monto=monto,
             metodo_pago_id=metodo_pago_id,
             descripcion=descripcion or "Cobro de turno",
             turno_id=turno_id,
+            fecha=fecha,
         )
+
+    def actualizar(self, id_: int, tipo: str, categoria: str, monto: float,
+                   metodo_pago_id: int = None, descripcion: str = "",
+                   fecha: str = None) -> tuple[bool, str]:
+        ok, msg = self._validar_movimiento(tipo, categoria, monto)
+        if not ok:
+            return False, msg
+        self._repo.actualizar(id_, tipo, categoria, monto, metodo_pago_id, descripcion, fecha)
+        return True, "Movimiento actualizado."
 
     def eliminar(self, id: int):
         self._repo.eliminar(id)
@@ -153,18 +152,7 @@ class CajaService:
     def _validar_movimiento(self, tipo: str, categoria: str, monto: float) -> tuple[bool, str]:
         if monto <= 0:
             return False, "El monto debe ser mayor a cero."
-
-        categorias_validas = CATEGORIAS_INGRESO if tipo == "ingreso" else CATEGORIAS_EGRESO
-        if categoria not in categorias_validas:
-            # Permitimos categoría libre si no está en la lista predefinida
-            # (la UI puede dejar que el usuario escriba una personalizada)
-            pass
-
         return True, ""
-
-    # ------------------------------------------------------------------ #
-    #  Helpers para la UI                                                  #
-    # ------------------------------------------------------------------ #
 
     @staticmethod
     def categorias_ingreso() -> list[str]:

@@ -4,14 +4,8 @@ import sys
 
 
 def _db_path() -> str:
-    """
-    En desarrollo: carpeta raiz del proyecto.
-    Empaquetado con PyInstaller --onefile: carpeta del .exe.
-    """
     if hasattr(sys, "_MEIPASS"):
-        # Ejecutable — guardar DB al lado del .exe
         return os.path.join(os.path.dirname(sys.executable), "beautybel.db")
-    # Desarrollo
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "beautybel.db")
 
 
@@ -26,7 +20,6 @@ def get_connection() -> sqlite3.Connection:
 
 
 def inicializar_db():
-    """Crea todas las tablas si no existen y carga datos iniciales."""
     conn = get_connection()
     try:
         _crear_tablas(conn)
@@ -75,11 +68,19 @@ def _crear_tablas(conn: sqlite3.Connection):
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             cliente_id   INTEGER NOT NULL REFERENCES clientes(id),
             empleada_id  INTEGER NOT NULL REFERENCES empleadas(id),
-            servicio_id  INTEGER NOT NULL REFERENCES servicios(id),
+            servicio_id  INTEGER REFERENCES servicios(id),
             fecha_hora   TEXT    NOT NULL,
             estado       TEXT    NOT NULL DEFAULT 'pendiente'
                              CHECK(estado IN ('pendiente','confirmado','completado','cancelado')),
             notas        TEXT
+        );
+
+        -- Tabla para multiples servicios por turno
+        CREATE TABLE IF NOT EXISTS turno_servicios (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            turno_id    INTEGER NOT NULL REFERENCES turnos(id) ON DELETE CASCADE,
+            servicio_id INTEGER NOT NULL REFERENCES servicios(id),
+            precio      REAL    NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS caja_movimientos (
@@ -145,27 +146,48 @@ def _crear_tablas(conn: sqlite3.Connection):
 
 
 def _migraciones(conn: sqlite3.Connection):
-    """
-    Agrega columnas nuevas a tablas existentes si la DB ya existia
-    sin ellas (ALTER TABLE es seguro: falla silenciosamente si la
-    columna ya existe, por eso usamos el try/except por columna).
-    """
     migraciones = [
-        ("ALTER TABLE servicios    ADD COLUMN categoria TEXT NOT NULL DEFAULT ''",),
+        ("ALTER TABLE servicios     ADD COLUMN categoria TEXT NOT NULL DEFAULT ''",),
         ("ALTER TABLE lista_precios ADD COLUMN categoria TEXT NOT NULL DEFAULT ''",),
+        ("ALTER TABLE lista_precios ADD COLUMN precios   TEXT NOT NULL DEFAULT ''",),
+        # turno_servicios ya se crea en _crear_tablas, pero por si la DB es vieja:
+        ("""CREATE TABLE IF NOT EXISTS turno_servicios (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            turno_id    INTEGER NOT NULL REFERENCES turnos(id) ON DELETE CASCADE,
+            servicio_id INTEGER NOT NULL REFERENCES servicios(id),
+            precio      REAL    NOT NULL DEFAULT 0
+        )""",),
     ]
     for (sql,) in migraciones:
         try:
             conn.execute(sql)
             conn.commit()
         except Exception:
-            # La columna ya existe — ignorar
             pass
+
+    # Migrar turnos existentes a turno_servicios si aun no tienen entradas
+    try:
+        rows = conn.execute(
+            """SELECT t.id, t.servicio_id, s.precio
+               FROM turnos t
+               JOIN servicios s ON s.id = t.servicio_id
+               WHERE t.servicio_id IS NOT NULL
+                 AND NOT EXISTS (
+                     SELECT 1 FROM turno_servicios ts WHERE ts.turno_id = t.id
+                 )"""
+        ).fetchall()
+        for row in rows:
+            conn.execute(
+                "INSERT INTO turno_servicios (turno_id, servicio_id, precio) VALUES (?,?,?)",
+                (row["id"], row["servicio_id"], row["precio"])
+            )
+        if rows:
+            conn.commit()
+    except Exception:
+        pass
 
 
 def _cargar_seeds(conn: sqlite3.Connection):
-    """Inserta datos iniciales solo si las tablas están vacías."""
-
     metodos = ["Efectivo", "MercadoPago", "Débito", "Crédito"]
     for nombre in metodos:
         conn.execute(

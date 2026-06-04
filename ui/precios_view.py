@@ -2,9 +2,10 @@
 ui/precios_view.py
 ------------------
 Vista de Precios — modulo independiente de Configuracion.
-Lista servicios/productos con categoria, precio, descuento y destacado.
-Incluye buscador en tiempo real; items destacados aparecen primero dentro
-de cada categoria.
+Lista servicios/productos con categoria, precio(s), descuento y destacado.
+- Categorias colapsables/expandibles.
+- Soporte para multiples precios separados por / (ej: 100/200/300).
+- Items destacados aparecen primero dentro de cada categoria.
 """
 
 import customtkinter as ctk
@@ -35,10 +36,14 @@ def _crear_tabla_precios():
             activo      INTEGER NOT NULL DEFAULT 1
         )
     """)
-    try:
-        conn.execute("ALTER TABLE lista_precios ADD COLUMN categoria TEXT NOT NULL DEFAULT ''")
-    except Exception:
-        pass
+    for col_sql in [
+        "ALTER TABLE lista_precios ADD COLUMN categoria TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE lista_precios ADD COLUMN precios   TEXT NOT NULL DEFAULT ''",
+    ]:
+        try:
+            conn.execute(col_sql)
+        except Exception:
+            pass
     conn.commit()
     conn.close()
 
@@ -62,12 +67,14 @@ def _obtener_categorias() -> list:
     return [r["categoria"] for r in rows]
 
 
-def _crear(nombre, categoria, precio, descuento, destacado):
+def _crear(nombre, categoria, precios_str, descuento, destacado):
+    # precio principal = primer valor (para compatibilidad con columna precio)
+    precio_principal = _primer_precio(precios_str)
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO lista_precios (nombre, categoria, precio, descuento, destacado) "
-        "VALUES (?,?,?,?,?)",
-        (nombre, categoria, precio, descuento, int(destacado)),
+        "INSERT INTO lista_precios (nombre, categoria, precio, precios, descuento, destacado) "
+        "VALUES (?,?,?,?,?,?)",
+        (nombre, categoria, precio_principal, precios_str, descuento, int(destacado)),
     )
     conn.commit()
     new_id = cur.lastrowid
@@ -75,13 +82,14 @@ def _crear(nombre, categoria, precio, descuento, destacado):
     return new_id
 
 
-def _actualizar(id_, nombre, categoria, precio, descuento, destacado, activo):
+def _actualizar(id_, nombre, categoria, precios_str, descuento, destacado, activo):
+    precio_principal = _primer_precio(precios_str)
     conn = get_connection()
     conn.execute(
         "UPDATE lista_precios "
-        "SET nombre=?, categoria=?, precio=?, descuento=?, destacado=?, activo=? "
+        "SET nombre=?, categoria=?, precio=?, precios=?, descuento=?, destacado=?, activo=? "
         "WHERE id=?",
-        (nombre, categoria, precio, descuento, int(destacado), int(activo), id_),
+        (nombre, categoria, precio_principal, precios_str, descuento, int(destacado), int(activo), id_),
     )
     conn.commit()
     conn.close()
@@ -92,6 +100,30 @@ def _eliminar(id_):
     conn.execute("DELETE FROM lista_precios WHERE id=?", (id_,))
     conn.commit()
     conn.close()
+
+
+def _primer_precio(precios_str: str) -> float:
+    """Extrae el primer numero del string de precios."""
+    try:
+        return float(precios_str.split("/")[0].strip())
+    except (ValueError, IndexError):
+        return 0.0
+
+
+def _formatear_precios(p: dict) -> str:
+    """Devuelve string legible de precios para mostrar en la lista."""
+    raw = (p.get("precios") or "").strip()
+    if raw:
+        partes = [x.strip() for x in raw.split("/") if x.strip()]
+        if partes:
+            return "  /  ".join("$" + x for x in partes)
+    # fallback a columna precio legacy
+    precio = p.get("precio", 0)
+    desc = p.get("descuento", 0)
+    if desc and desc > 0:
+        final = precio * (1 - desc / 100)
+        return "$" + str(int(precio)) + "  ->  $" + str(int(final)) + "  (-" + str(int(desc)) + "%)"
+    return "$" + str(int(precio))
 
 
 # ------------------------------------------------------------------ #
@@ -188,6 +220,8 @@ class PreciosView(VistaBase):
 
     def _construir_contenido(self):
         self._seleccionado = None
+        # Estado colapsado por categoria: {nombre_cat: bool}
+        self._colapsado = {}
 
         outer = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
         outer.pack(fill="both", expand=True, padx=24, pady=16)
@@ -271,23 +305,55 @@ class PreciosView(VistaBase):
             grupos.setdefault(cat, []).append(p)
 
         for cat in sorted(grupos.keys()):
-            ctk.CTkLabel(
-                self._lista,
-                text=cat.upper(),
+            colapsado = self._colapsado.get(cat, False)
+
+            # ---- Encabezado de categoria (clickeable) ----
+            enc_frame = ctk.CTkFrame(self._lista, fg_color="transparent", cursor="hand2")
+            enc_frame.pack(fill="x", padx=10, pady=(10, 2))
+            enc_frame.columnconfigure(0, weight=1)
+
+            flecha = "▶" if colapsado else "▼"
+            lbl_cat = ctk.CTkLabel(
+                enc_frame,
+                text=flecha + "  " + cat.upper(),
                 font=FUENTES["small"],
                 text_color=COLORES["rosa"],
                 anchor="w",
-            ).pack(fill="x", padx=10, pady=(10, 2))
+                cursor="hand2",
+            )
+            lbl_cat.grid(row=0, column=0, sticky="ew")
+
             ctk.CTkFrame(
                 self._lista, height=1, fg_color=COLORES["rosa_suave"]
             ).pack(fill="x", padx=10, pady=(0, 4))
 
+            # Contenedor de items (se oculta al colapsar)
+            items_frame = ctk.CTkFrame(self._lista, fg_color="transparent")
+            items_frame.columnconfigure(0, weight=1)
+
+            if not colapsado:
+                items_frame.pack(fill="x")
+
             for p in grupos[cat]:
                 sel = (seleccionar_id is not None and p["id"] == seleccionar_id)
                 _ItemPrecio(
-                    self._lista, item=p, seleccionado=sel,
+                    items_frame, item=p, seleccionado=sel,
                     al_seleccionar=self._item_seleccionado,
                 ).pack(fill="x", padx=4, pady=2)
+
+            # Toggle al hacer click en el encabezado
+            def _toggle(c=cat):
+                self._colapsado[c] = not self._colapsado.get(c, False)
+                texto = self._var_busqueda.get().strip().lower()
+                if texto:
+                    filtrados = [p for p in self._todos
+                                 if texto in p["nombre"].lower() or texto in p["categoria"].lower()]
+                else:
+                    filtrados = self._todos
+                self._renderizar(filtrados, None)
+
+            enc_frame.bind("<Button-1>", lambda _e, t=_toggle: t())
+            lbl_cat.bind("<Button-1>", lambda _e, t=_toggle: t())
 
     # ---------------------------------------------------------------- #
     #  Seleccion / nuevo                                                 #
@@ -339,9 +405,17 @@ class PreciosView(VistaBase):
         e_nombre = campo_texto(form, ancho=0)
         e_nombre.grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=8)
 
-        etiqueta_suave(form, "Precio ($) *").grid(row=2, column=0, sticky="w", pady=8)
-        e_precio = campo_texto(form, placeholder="0", ancho=0)
-        e_precio.grid(row=2, column=1, sticky="ew", padx=(12, 0), pady=8)
+        # Campo de precios multiples
+        etiqueta_suave(form, "Precio(s) *").grid(row=2, column=0, sticky="w", pady=8)
+        fila_precio = ctk.CTkFrame(form, fg_color="transparent")
+        fila_precio.grid(row=2, column=1, sticky="ew", padx=(12, 0), pady=8)
+        fila_precio.columnconfigure(0, weight=1)
+        e_precios = campo_texto(fila_precio, placeholder="Ej: 100  o  100/200/300", ancho=0)
+        e_precios.grid(row=0, column=0, sticky="ew")
+        ctk.CTkLabel(
+            fila_precio, text="Separa varios precios con  /",
+            font=FUENTES["small"], text_color=COLORES["texto_suave"], anchor="w",
+        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
 
         etiqueta_suave(form, "Descuento (%)").grid(row=3, column=0, sticky="w", pady=8)
         fila_desc = ctk.CTkFrame(form, fg_color="transparent")
@@ -357,17 +431,19 @@ class PreciosView(VistaBase):
 
         def _actualizar_preview(*_):
             try:
-                p = float(e_precio.get().strip() or 0)
+                raw = e_precios.get().strip()
+                partes = [float(x.strip()) for x in raw.split("/") if x.strip()]
                 d = float(e_desc.get().strip() or 0)
-                if d > 0:
-                    lbl_final.configure(text=f"-> Precio final: ${p * (1 - d / 100):,.0f}")
+                if partes and d > 0:
+                    finals = ["$" + str(int(p * (1 - d / 100))) for p in partes]
+                    lbl_final.configure(text="-> " + "  /  ".join(finals))
                 else:
                     lbl_final.configure(text="")
             except ValueError:
                 lbl_final.configure(text="")
 
-        e_precio.bind("<KeyRelease>", _actualizar_preview)
-        e_desc.bind("<KeyRelease>",   _actualizar_preview)
+        e_precios.bind("<KeyRelease>", _actualizar_preview)
+        e_desc.bind("<KeyRelease>",    _actualizar_preview)
 
         var_destacado = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
@@ -388,7 +464,11 @@ class PreciosView(VistaBase):
 
             e_cat.insert(0, precio["categoria"] or "")
             e_nombre.insert(0, precio["nombre"] or "")
-            e_precio.insert(0, str(precio["precio"]))
+            # Preferir columna precios, fallback a precio
+            precios_raw = (precio.get("precios") or "").strip()
+            if not precios_raw:
+                precios_raw = str(int(precio["precio"])) if precio["precio"] else ""
+            e_precios.insert(0, precios_raw)
             e_desc.insert(0, str(int(precio["descuento"])) if precio["descuento"] else "")
             var_destacado.set(bool(precio["destacado"]))
             var_activo.set(bool(precio["activo"]))
@@ -410,27 +490,41 @@ class PreciosView(VistaBase):
             if not nombre:
                 mostrar_error("Error", "El nombre no puede estar vacio.")
                 return
+            precios_str = e_precios.get().strip()
+            if not precios_str:
+                mostrar_error("Error", "Ingresa al menos un precio.")
+                return
+            # Validar que todos sean numeros
             try:
-                p = float(e_precio.get().strip() or 0)
+                valores = [float(x.strip()) for x in precios_str.split("/") if x.strip()]
+                if not valores:
+                    raise ValueError
+                if any(v < 0 for v in valores):
+                    mostrar_error("Error", "Los precios no pueden ser negativos.")
+                    return
+            except ValueError:
+                mostrar_error("Error", "Los precios deben ser numeros separados por /.")
+                return
+            try:
                 d = float(e_desc.get().strip() or 0)
             except ValueError:
-                mostrar_error("Error", "Precio y descuento deben ser numeros.")
-                return
-            if p < 0:
-                mostrar_error("Error", "El precio no puede ser negativo.")
+                mostrar_error("Error", "El descuento debe ser un numero.")
                 return
             if not (0 <= d <= 100):
                 mostrar_error("Error", "El descuento debe estar entre 0 y 100.")
                 return
 
+            # Normalizar: guardar sin espacios extras
+            precios_normalizado = "/".join(str(int(v) if v == int(v) else v) for v in valores)
             categoria = e_cat.get().strip()
+
             if es_edicion:
-                _actualizar(precio["id"], nombre, categoria, p, d,
+                _actualizar(precio["id"], nombre, categoria, precios_normalizado, d,
                              var_destacado.get(), var_activo.get())
                 sid = precio["id"]
                 mostrar_exito("Listo", "Precio actualizado correctamente.")
             else:
-                sid = _crear(nombre, categoria, p, d, var_destacado.get())
+                sid = _crear(nombre, categoria, precios_normalizado, d, var_destacado.get())
                 mostrar_exito("Listo", "Precio creado correctamente.")
 
             self._cargar(seleccionar_id=sid)
@@ -484,14 +578,8 @@ class _ItemPrecio(ctk.CTkFrame):
             font=FUENTES["normal"], text_color=nombre_color, anchor="w",
         ).grid(row=0, column=1, sticky="w", padx=8, pady=(8, 1))
 
-        precio = item["precio"]
-        desc   = item["descuento"]
-        if desc and desc > 0:
-            linea2 = "$" + str(int(precio)) + "  ->  $" + str(int(precio * (1 - desc / 100))) + "  (-" + str(int(desc)) + "%)"
-            color2 = COLORES["exito"]
-        else:
-            linea2 = "$" + str(int(precio))
-            color2 = COLORES["texto_suave"]
+        linea2 = _formatear_precios(item)
+        color2 = COLORES["exito"] if item.get("descuento", 0) > 0 else COLORES["texto_suave"]
 
         ctk.CTkLabel(
             self, text=linea2,
