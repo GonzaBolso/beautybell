@@ -139,24 +139,28 @@ class CajaService:
         """
         pagos: lista de dicts {metodo_pago_id, monto}
         Registra un movimiento de caja separado por cada metodo de pago,
-        todos vinculados al mismo turno_id.
+        todos vinculados al mismo turno_id, en una unica transaccion
+        (si alguno es invalido o falla, no se registra ninguno).
         """
         if not pagos:
             return False, "Debes ingresar al menos un metodo de pago.", []
 
-        ids_creados = []
         for p in pagos:
-            ok, msg, caja_id = self.registrar_ingreso(
-                categoria="Servicio",
-                monto=p["monto"],
-                metodo_pago_id=p["metodo_pago_id"],
-                descripcion=descripcion or "Cobro de turno",
-                turno_id=turno_id,
-                fecha=fecha,
-            )
+            ok, msg = self._validar_movimiento("ingreso", "Servicio", p["monto"])
             if not ok:
-                return False, msg, ids_creados
-            ids_creados.append(caja_id)
+                return False, msg, []
+
+        try:
+            ids_creados = self._repo.registrar_multiple(
+                tipo="ingreso",
+                categoria="Servicio",
+                pagos=pagos,
+                descripcion=descripcion or "Cobro de turno",
+                fecha=fecha,
+                turno_id=turno_id,
+            )
+        except Exception as e:
+            return False, f"Error al registrar el cobro: {e}", []
 
         return True, "Cobro registrado correctamente.", ids_creados
 

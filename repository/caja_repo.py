@@ -73,6 +73,33 @@ class CajaRepo(BaseRepo):
         )
         return self._ultimo_id(cur)
 
+    def registrar_multiple(self, tipo: str, categoria: str, pagos: list,
+                            descripcion: str = "", fecha: str = None,
+                            turno_id: int = None) -> list[int]:
+        """
+        Inserta un movimiento por cada pago en `pagos` dentro de una unica
+        transaccion: si alguno falla, se revierten todos (no queda estado
+        parcial en caja).
+        """
+        from datetime import date as _date
+        fecha_final = fecha or _date.today().strftime("%Y-%m-%d")
+        ids = []
+        try:
+            for p in pagos:
+                cur = self._conn.execute(
+                    """INSERT INTO caja_movimientos
+                       (tipo, categoria, monto, metodo_pago_id, descripcion, fecha, turno_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (tipo, categoria, p["monto"], p["metodo_pago_id"],
+                     descripcion, fecha_final, turno_id)
+                )
+                ids.append(cur.lastrowid)
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+        return ids
+
     def actualizar(self, id_: int, tipo: str, categoria: str, monto: float,
                    metodo_pago_id: int = None, descripcion: str = "",
                    fecha: str = None):

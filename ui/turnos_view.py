@@ -333,9 +333,11 @@ class _TarjetaTurno(ctk.CTkFrame):
         estado  = turno["estado"]
         colores = ESTADO_COLORES.get(estado, ("#F8F9FA", "#495057"))
 
-        # Franja de color izquierda
+        # Franja de color izquierda — cubre todas las filas de la tarjeta,
+        # incluida la fila extra que aparece cuando el turno tiene notas.
+        filas_totales = 6 if turno["notas"] else 5
         franja = ctk.CTkFrame(self, width=6, fg_color=colores[1], corner_radius=0)
-        franja.grid(row=0, column=0, sticky="ns", rowspan=5)
+        franja.grid(row=0, column=0, sticky="ns", rowspan=filas_totales)
         franja.grid_propagate(False)
 
         # Columna de contenido
@@ -631,11 +633,6 @@ class _DialogCobro(ctk.CTkToplevel):
         servicios = self._turno.get("servicios", [])
         nombres_srv = ", ".join(s["servicio_nombre"] for s in servicios) if servicios else (self._turno.get("servicio_nombre") or "")
 
-        ok, msg = self._turno_service.completar(self._turno["id"])
-        if not ok:
-            mostrar_error("Error al completar", msg)
-            return
-
         from datetime import datetime
         ok, msg, ids_caja = self._caja_service.registrar_cobro_turno_multiple(
             turno_id=self._turno["id"],
@@ -647,6 +644,11 @@ class _DialogCobro(ctk.CTkToplevel):
         )
         if not ok:
             mostrar_error("Error al registrar en caja", msg)
+            return
+
+        ok, msg = self._turno_service.completar(self._turno["id"])
+        if not ok:
+            mostrar_error("Error al completar", msg)
             return
 
         self.grab_release()
