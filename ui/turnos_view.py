@@ -333,9 +333,28 @@ class _TarjetaTurno(ctk.CTkFrame):
         estado  = turno["estado"]
         colores = ESTADO_COLORES.get(estado, ("#F8F9FA", "#495057"))
 
-        # Franja de color izquierda — cubre todas las filas de la tarjeta,
-        # incluida la fila extra que aparece cuando el turno tiene notas.
-        filas_totales = 6 if turno["notas"] else 5
+        # Agrupar servicios por empleada, preservando el orden de aparicion
+        servicios = turno.get("servicios", [])
+        if not servicios:
+            servicios = [{
+                "empleada_nombre": turno.get("empleada_nombre") or "—",
+                "servicio_nombre": turno.get("servicio_nombre") or "—",
+                "precio": turno.get("servicio_precio") or 0,
+            }]
+
+        grupos_por_empleada = {}
+        orden_empleadas = []
+        for s in servicios:
+            nombre_emp = s.get("empleada_nombre") or turno.get("empleada_nombre") or "—"
+            if nombre_emp not in grupos_por_empleada:
+                grupos_por_empleada[nombre_emp] = []
+                orden_empleadas.append(nombre_emp)
+            grupos_por_empleada[nombre_emp].append(s)
+
+        # Franja de color izquierda — cubre todas las filas de la tarjeta:
+        # hora/cliente, una fila por empleada, total, notas (opcional),
+        # separador y botones.
+        filas_totales = 4 + len(orden_empleadas) + (1 if turno["notas"] else 0)
         franja = ctk.CTkFrame(self, width=6, fg_color=colores[1], corner_radius=0)
         franja.grid(row=0, column=0, sticky="ns", rowspan=filas_totales)
         franja.grid_propagate(False)
@@ -360,52 +379,52 @@ class _TarjetaTurno(ctk.CTkFrame):
                      fg_color=colores[0], text_color=colores[1],
                      corner_radius=6).grid(row=0, column=2, sticky="e")
 
-        # --- Fila 1: empleada + precio ---
-        fila1 = ctk.CTkFrame(self, fg_color="transparent")
-        fila1.grid(row=1, column=1, sticky="ew", padx=(12, 12), pady=(2, 0))
-        fila1.columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(fila1, text=turno["empleada_nombre"],
-                     font=FUENTES["small"],
-                     text_color=COLORES["texto_suave"]).grid(row=0, column=0, sticky="w")
-        precio_total = turno.get("precio_total", 0)
-        ctk.CTkLabel(fila1, text="$" + str(int(precio_total)),
-                     font=FUENTES["small"],
-                     text_color=COLORES["texto"]).grid(row=0, column=1, sticky="e")
-
-        # --- Fila 2: servicios ---
-        servicios = turno.get("servicios", [])
-        if servicios:
-            nombres_srv = ",  ".join(
+        # --- Una fila por empleada, con sus servicios ---
+        fila_i = 1
+        for nombre_emp in orden_empleadas:
+            srv_list = grupos_por_empleada[nombre_emp]
+            texto_srv = ",  ".join(
                 s["servicio_nombre"] + " ($" + str(int(s["precio"])) + ")"
-                for s in servicios
+                for s in srv_list
             )
-        else:
-            nombres_srv = turno.get("servicio_nombre") or "—"
+            fila_emp = ctk.CTkFrame(self, fg_color="transparent")
+            fila_emp.grid(row=fila_i, column=1, sticky="ew", padx=(12, 12), pady=(2, 0))
+            ctk.CTkLabel(fila_emp, text=nombre_emp + ":",
+                         font=FUENTES["small"],
+                         text_color=COLORES["texto_suave"]).pack(side="left")
+            ctk.CTkLabel(fila_emp, text=" " + texto_srv,
+                         font=FUENTES["small"],
+                         text_color=COLORES["texto"],
+                         anchor="w", wraplength=360,
+                         justify="left").pack(side="left", fill="x", expand=True)
+            fila_i += 1
 
-        ctk.CTkLabel(self, text=nombres_srv,
+        # --- Fila de total ---
+        precio_total = turno.get("precio_total", 0)
+        fila_total = ctk.CTkFrame(self, fg_color="transparent")
+        fila_total.grid(row=fila_i, column=1, sticky="ew", padx=(12, 12), pady=(2, 0))
+        ctk.CTkLabel(fila_total, text="Total: $" + str(int(precio_total)),
                      font=FUENTES["small"],
-                     text_color=COLORES["texto_suave"],
-                     anchor="w", wraplength=400,
-                     ).grid(row=2, column=1, sticky="ew", padx=(12, 12), pady=(2, 0))
+                     text_color=COLORES["texto"]).pack(side="right")
+        fila_i += 1
 
-        # --- Fila 2b: notas (opcional) ---
-        fila_notas = 3
+        # --- Notas (opcional) ---
         if turno["notas"]:
             ctk.CTkLabel(self, text=turno["notas"],
                          font=FUENTES["small"],
                          text_color=COLORES["texto_suave"],
-                         anchor="w").grid(row=3, column=1, sticky="ew",
+                         anchor="w").grid(row=fila_i, column=1, sticky="ew",
                                           padx=(12, 12), pady=(2, 0))
-            fila_notas = 4
+            fila_i += 1
 
         # --- Separador ---
-        separador(self).grid(row=fila_notas, column=1, sticky="ew",
+        separador(self).grid(row=fila_i, column=1, sticky="ew",
                              padx=(12, 12), pady=(1, 0))
+        fila_i += 1
 
         # --- Fila botones ---
         acc = ctk.CTkFrame(self, fg_color="transparent")
-        acc.grid(row=fila_notas + 1, column=1, sticky="ew",
+        acc.grid(row=fila_i, column=1, sticky="ew",
                  padx=(12, 12), pady=(4, 4))
 
         if estado == "pendiente":
@@ -488,16 +507,30 @@ class _DialogCobro(ctk.CTkToplevel):
         etiqueta(self._scroll, turno["cliente_nombre"] + "  -  " + hora,
                  fuente="subtitulo").pack(anchor="w", padx=20, pady=(16, 2))
 
-        # Mostrar servicios
+        # Mostrar servicios, agrupados por empleada
         servicios = turno.get("servicios", [])
         if servicios:
+            grupos_por_empleada = {}
+            orden_empleadas = []
             for s in servicios:
+                nombre_emp = s.get("empleada_nombre") or turno.get("empleada_nombre") or "—"
+                if nombre_emp not in grupos_por_empleada:
+                    grupos_por_empleada[nombre_emp] = []
+                    orden_empleadas.append(nombre_emp)
+                grupos_por_empleada[nombre_emp].append(s)
+
+            for nombre_emp in orden_empleadas:
                 ctk.CTkLabel(
-                    self._scroll,
-                    text="• " + s["servicio_nombre"] + "  $" + str(int(s["precio"])),
-                    font=FUENTES["small"],
-                    text_color=COLORES["texto_suave"],
-                ).pack(anchor="w", padx=32)
+                    self._scroll, text=nombre_emp,
+                    font=FUENTES["small"], text_color=COLORES["rosa"],
+                ).pack(anchor="w", padx=20, pady=(4, 0))
+                for s in grupos_por_empleada[nombre_emp]:
+                    ctk.CTkLabel(
+                        self._scroll,
+                        text="• " + s["servicio_nombre"] + "  $" + str(int(s["precio"])),
+                        font=FUENTES["small"],
+                        text_color=COLORES["texto_suave"],
+                    ).pack(anchor="w", padx=32)
         else:
             etiqueta_suave(self._scroll, turno.get("servicio_nombre", "")).pack(anchor="w", padx=20)
 
@@ -633,6 +666,16 @@ class _DialogCobro(ctk.CTkToplevel):
         servicios = self._turno.get("servicios", [])
         nombres_srv = ", ".join(s["servicio_nombre"] for s in servicios) if servicios else (self._turno.get("servicio_nombre") or "")
 
+        if servicios:
+            nombres_emp = []
+            for s in servicios:
+                nombre_emp = s.get("empleada_nombre") or self._turno.get("empleada_nombre") or ""
+                if nombre_emp and nombre_emp not in nombres_emp:
+                    nombres_emp.append(nombre_emp)
+            nombres_emp_txt = ", ".join(nombres_emp)
+        else:
+            nombres_emp_txt = self._turno.get("empleada_nombre") or ""
+
         from datetime import datetime
         ok, msg, ids_caja = self._caja_service.registrar_cobro_turno_multiple(
             turno_id=self._turno["id"],
@@ -640,7 +683,7 @@ class _DialogCobro(ctk.CTkToplevel):
             fecha=datetime.now().strftime("%Y-%m-%d"),
             descripcion="Cobro: " + self._turno["cliente_nombre"]
                         + " - " + nombres_srv
-                        + " - " + self._turno["empleada_nombre"],
+                        + " - " + nombres_emp_txt,
         )
         if not ok:
             mostrar_error("Error al registrar en caja", msg)
@@ -782,7 +825,7 @@ class _FormTurno(ctk.CTkToplevel):
         self._fecha_inicial = fecha_inicial or date.today()
         self._al_guardar    = al_guardar
         self._es_edicion    = turno is not None
-        self._filas_servicios = []
+        self._grupos_empleados = []
 
         self.title("Editar turno" if self._es_edicion else "Nuevo turno")
         self.geometry("500x680")
@@ -794,7 +837,7 @@ class _FormTurno(ctk.CTkToplevel):
         if self._es_edicion:
             self._rellenar()
         else:
-            self._agregar_fila_servicio()
+            self._agregar_grupo_empleado()
         self.after(100, self._forzar_foco)
 
     def _forzar_foco(self):
@@ -840,26 +883,15 @@ class _FormTurno(ctk.CTkToplevel):
         )
         self._buscador_cli.pack(padx=28, pady=5)
 
-        etiqueta_suave(self._scroll, "Empleada *").pack(anchor="w", padx=28, pady=(8, 2))
-        self._var_emp = ctk.StringVar()
-        self._combo_emp = ctk.CTkComboBox(
-            self._scroll, values=list(self._empleadas_map.keys()),
-            variable=self._var_emp, width=444, height=36,
-            fg_color=COLORES["fondo_input"], border_color=COLORES["borde"],
-            button_color=COLORES["rosa"], button_hover_color=COLORES["rosa_hover"],
-            text_color=COLORES["texto"], font=FUENTES["normal"], corner_radius=8,
-        )
-        self._combo_emp.pack(**pad)
+        etiqueta_suave(self._scroll, "Empleados y servicios *").pack(anchor="w", padx=28, pady=(8, 2))
 
-        etiqueta_suave(self._scroll, "Servicios *").pack(anchor="w", padx=28, pady=(8, 2))
-
-        self._frame_servicios = ctk.CTkFrame(self._scroll, fg_color="transparent")
-        self._frame_servicios.pack(fill="x", padx=28)
-        self._frame_servicios.columnconfigure(0, weight=1)
+        self._frame_grupos = ctk.CTkFrame(self._scroll, fg_color="transparent")
+        self._frame_grupos.pack(fill="x", padx=28)
+        self._frame_grupos.columnconfigure(0, weight=1)
 
         boton_secundario(
-            self._scroll, "+ Agregar servicio",
-            comando=self._agregar_fila_servicio, ancho=200,
+            self._scroll, "+ Agregar empleado",
+            comando=self._agregar_grupo_empleado, ancho=200,
         ).pack(anchor="w", padx=28, pady=(4, 0))
 
         self._lbl_total = ctk.CTkLabel(
@@ -903,14 +935,92 @@ class _FormTurno(ctk.CTkToplevel):
         )
         self._notas.pack(padx=28, pady=(0, 20))
 
-    def _agregar_fila_servicio(self, servicio_nombre="", precio_val=""):
-        fila = ctk.CTkFrame(self._frame_servicios, fg_color=COLORES["rosa_suave"],
+    def _agregar_grupo_empleado(self, empleada_nombre=""):
+        grupo_frame = ctk.CTkFrame(self._frame_grupos, fg_color=COLORES["fondo_card"],
+                                   corner_radius=10, border_width=1,
+                                   border_color=COLORES["borde"])
+        grupo_frame.pack(fill="x", pady=5)
+        grupo_frame.columnconfigure(0, weight=1)
+
+        cab = ctk.CTkFrame(grupo_frame, fg_color="transparent")
+        cab.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 4))
+        cab.columnconfigure(0, weight=1)
+
+        var_emp = ctk.StringVar(value=empleada_nombre)
+        combo_emp = ctk.CTkComboBox(
+            cab, values=list(self._empleadas_map.keys()),
+            variable=var_emp, width=0, height=36,
+            fg_color=COLORES["fondo_input"], border_color=COLORES["borde"],
+            button_color=COLORES["rosa"], button_hover_color=COLORES["rosa_hover"],
+            text_color=COLORES["texto"], font=FUENTES["normal"], corner_radius=8,
+        )
+        combo_emp.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+
+        btn_quitar_grupo = ctk.CTkButton(
+            cab, text="✕ Quitar empleado", width=0, height=32,
+            fg_color="transparent", hover_color="#FDECEA",
+            text_color=COLORES["error"], font=FUENTES["small"],
+            corner_radius=6,
+        )
+        btn_quitar_grupo.grid(row=0, column=1)
+
+        frame_servicios = ctk.CTkFrame(grupo_frame, fg_color="transparent")
+        frame_servicios.grid(row=1, column=0, sticky="ew", padx=10)
+        frame_servicios.columnconfigure(0, weight=1)
+
+        lbl_subtotal = ctk.CTkLabel(
+            grupo_frame, text="Subtotal: $0",
+            font=FUENTES["small"], text_color=COLORES["texto_suave"], anchor="w",
+        )
+        lbl_subtotal.grid(row=3, column=0, sticky="w", padx=10, pady=(0, 10))
+
+        grupo = {
+            "frame": grupo_frame, "var_emp": var_emp, "combo_emp": combo_emp,
+            "frame_servicios": frame_servicios, "filas_servicios": [],
+            "lbl_subtotal": lbl_subtotal, "btn_quitar_grupo": btn_quitar_grupo,
+        }
+        self._grupos_empleados.append(grupo)
+
+        btn_agregar_srv = boton_secundario(
+            grupo_frame, "+ Agregar servicio",
+            comando=lambda: self._agregar_fila_servicio(grupo), ancho=180,
+        )
+        btn_agregar_srv.grid(row=2, column=0, sticky="w", padx=10, pady=(2, 6))
+
+        def _quitar_grupo(g=grupo):
+            if len(self._grupos_empleados) <= 1:
+                mostrar_error("Error", "Debe haber al menos un empleado.")
+                return
+            g["frame"].destroy()
+            self._grupos_empleados.remove(g)
+            self._actualizar_total()
+
+        btn_quitar_grupo.configure(command=_quitar_grupo)
+
+        self._agregar_fila_servicio(grupo)
+        return grupo
+
+    def _agregar_fila_servicio(self, grupo, servicio_nombre="", precio_val=""):
+        fila = ctk.CTkFrame(grupo["frame_servicios"], fg_color=COLORES["rosa_suave"],
                             corner_radius=8)
         fila.pack(fill="x", pady=3)
         fila.columnconfigure(0, weight=2)
         fila.columnconfigure(1, weight=1)
 
         var_srv = ctk.StringVar(value=servicio_nombre)
+
+        buscador = _BuscadorConDropdown(
+            fila,
+            opciones=self._servicios_nombres,
+            placeholder="Buscar servicio...",
+            ancho=0,
+            var_externa=var_srv,
+        )
+        buscador.grid(row=0, column=0, sticky="ew", padx=(8, 4), pady=6)
+
+        e_precio = campo_texto(fila, placeholder="$", ancho=0)
+        e_precio.grid(row=0, column=1, sticky="ew", padx=(0, 4), pady=6)
+        e_precio.bind("<KeyRelease>", lambda _: self._actualizar_total())
 
         def _al_cambiar_srv(*_):
             nombre = var_srv.get()
@@ -922,22 +1032,11 @@ class _FormTurno(ctk.CTkToplevel):
 
         var_srv.trace_add("write", _al_cambiar_srv)
 
-        buscador = _BuscadorConDropdown(
-            fila,
-            opciones=self._servicios_nombres,
-            placeholder="Buscar servicio...",
-            ancho=0,
-            var_externa=var_srv,
-        )
-        buscador.grid(row=0, column=0, sticky="ew", padx=(8, 4), pady=6)
         if servicio_nombre:
             buscador.set(servicio_nombre)
-
-        e_precio = campo_texto(fila, placeholder="$", ancho=0)
         if precio_val:
+            e_precio.delete(0, "end")
             e_precio.insert(0, str(precio_val))
-        e_precio.grid(row=0, column=1, sticky="ew", padx=(0, 4), pady=6)
-        e_precio.bind("<KeyRelease>", lambda _: self._actualizar_total())
 
         btn_quitar = ctk.CTkButton(
             fila, text="✕", width=28, height=28,
@@ -948,14 +1047,14 @@ class _FormTurno(ctk.CTkToplevel):
         btn_quitar.grid(row=0, column=2, padx=(0, 6), pady=6)
 
         info = {"frame": fila, "var_srv": var_srv, "e_precio": e_precio}
-        self._filas_servicios.append(info)
+        grupo["filas_servicios"].append(info)
 
-        def _quitar(i=info):
-            if len(self._filas_servicios) <= 1:
-                mostrar_error("Error", "Debe haber al menos un servicio.")
+        def _quitar(i=info, g=grupo):
+            if len(g["filas_servicios"]) <= 1:
+                mostrar_error("Error", "Cada empleado debe tener al menos un servicio.")
                 return
             i["frame"].destroy()
-            self._filas_servicios.remove(i)
+            g["filas_servicios"].remove(i)
             self._actualizar_total()
 
         btn_quitar.configure(command=_quitar)
@@ -963,11 +1062,15 @@ class _FormTurno(ctk.CTkToplevel):
 
     def _actualizar_total(self):
         total = 0.0
-        for info in self._filas_servicios:
-            try:
-                total += float(info["e_precio"].get().strip() or 0)
-            except ValueError:
-                pass
+        for grupo in self._grupos_empleados:
+            subtotal = 0.0
+            for info in grupo["filas_servicios"]:
+                try:
+                    subtotal += float(info["e_precio"].get().strip() or 0)
+                except ValueError:
+                    pass
+            grupo["lbl_subtotal"].configure(text="Subtotal: $" + str(int(subtotal)))
+            total += subtotal
         self._lbl_total.configure(text="Total: $" + str(int(total)))
 
     def _rellenar(self):
@@ -976,27 +1079,42 @@ class _FormTurno(ctk.CTkToplevel):
             if id_ == t["cliente_id"]:
                 self._buscador_cli.set(nombre)
                 break
-        for nombre, id_ in self._empleadas_map.items():
-            if id_ == t["empleada_id"]:
-                self._var_emp.set(nombre)
-                break
+
+        nombres_emp_por_id = {id_: nombre for nombre, id_ in self._empleadas_map.items()}
+
+        def _nombre_servicio(servicio_id):
+            for n, sid in self._servicios_map.items():
+                if sid == servicio_id:
+                    return n
+            return ""
 
         servicios = t.get("servicios", [])
-        if servicios:
-            for s in servicios:
-                nombre_srv = ""
-                for n, sid in self._servicios_map.items():
-                    if sid == s["servicio_id"]:
-                        nombre_srv = n
-                        break
-                self._agregar_fila_servicio(nombre_srv, int(s["precio"]))
-        else:
-            nombre_srv = ""
-            for n, sid in self._servicios_map.items():
-                if sid == t.get("servicio_id"):
-                    nombre_srv = n
-                    break
-            self._agregar_fila_servicio(nombre_srv, int(t.get("servicio_precio", 0)))
+        if not servicios:
+            servicios = [{
+                "servicio_id": t.get("servicio_id"),
+                "empleada_id": t.get("empleada_id"),
+                "precio": t.get("servicio_precio", 0),
+            }]
+
+        # Agrupar servicios por empleada, preservando el orden de aparicion
+        grupos_por_empleada = {}
+        orden_empleadas = []
+        for s in servicios:
+            emp_id = s.get("empleada_id")
+            if emp_id not in grupos_por_empleada:
+                grupos_por_empleada[emp_id] = []
+                orden_empleadas.append(emp_id)
+            grupos_por_empleada[emp_id].append(s)
+
+        for emp_id in orden_empleadas:
+            nombre_emp = nombres_emp_por_id.get(emp_id, "")
+            grupo = self._agregar_grupo_empleado(nombre_emp)
+            primer_fila = grupo["filas_servicios"][0]
+            primer_fila["frame"].destroy()
+            grupo["filas_servicios"].clear()
+            for s in grupos_por_empleada[emp_id]:
+                nombre_srv = _nombre_servicio(s["servicio_id"])
+                self._agregar_fila_servicio(grupo, nombre_srv, int(s["precio"]))
 
         fh = t["fecha_hora"]
         self._fecha.delete(0, "end")
@@ -1010,7 +1128,6 @@ class _FormTurno(ctk.CTkToplevel):
 
     def _guardar(self):
         nombre_cli = self._buscador_cli.get().strip()
-        nombre_emp = self._var_emp.get().strip()
         fecha_txt  = self._fecha.get().strip()
         hora_txt   = self._hora.get().strip()
         notas      = self._notas.get("1.0", "end").strip()
@@ -1018,28 +1135,49 @@ class _FormTurno(ctk.CTkToplevel):
         if not nombre_cli or nombre_cli not in self._clientes_map:
             mostrar_error("Error", "Selecciona un cliente valido.")
             return
-        if not nombre_emp or nombre_emp not in self._empleadas_map:
-            mostrar_error("Error", "Selecciona una empleada valida.")
-            return
         if not hora_txt:
             mostrar_error("Error", "Ingresa la hora (HH:MM).")
             return
+        if not self._grupos_empleados:
+            mostrar_error("Error", "Agrega al menos un empleado con sus servicios.")
+            return
 
         servicios = []
-        for info in self._filas_servicios:
-            nombre_srv = info["var_srv"].get().strip()
-            if not nombre_srv or nombre_srv not in self._servicios_map:
-                mostrar_error("Error", "Selecciona un servicio valido en cada fila.")
+        empleadas_usadas = set()
+        for grupo in self._grupos_empleados:
+            nombre_emp = grupo["var_emp"].get().strip()
+            if not nombre_emp or nombre_emp not in self._empleadas_map:
+                mostrar_error("Error", "Selecciona una empleada valida en cada tarjeta.")
                 return
-            try:
-                precio = float(info["e_precio"].get().strip() or 0)
-            except ValueError:
-                mostrar_error("Error", "El precio debe ser un numero.")
+            emp_id = self._empleadas_map[nombre_emp]
+            if emp_id in empleadas_usadas:
+                mostrar_error(
+                    "Error",
+                    "Ya agregaste a " + nombre_emp + ". "
+                    "Agregá sus servicios en su misma tarjeta."
+                )
                 return
-            servicios.append({
-                "servicio_id": self._servicios_map[nombre_srv],
-                "precio": precio,
-            })
+            empleadas_usadas.add(emp_id)
+
+            if not grupo["filas_servicios"]:
+                mostrar_error("Error", "Cada empleado debe tener al menos un servicio.")
+                return
+
+            for info in grupo["filas_servicios"]:
+                nombre_srv = info["var_srv"].get().strip()
+                if not nombre_srv or nombre_srv not in self._servicios_map:
+                    mostrar_error("Error", "Selecciona un servicio valido en cada fila.")
+                    return
+                try:
+                    precio = float(info["e_precio"].get().strip() or 0)
+                except ValueError:
+                    mostrar_error("Error", "El precio debe ser un numero.")
+                    return
+                servicios.append({
+                    "servicio_id": self._servicios_map[nombre_srv],
+                    "empleada_id": emp_id,
+                    "precio": precio,
+                })
 
         if not servicios:
             mostrar_error("Error", "Agrega al menos un servicio.")
@@ -1047,21 +1185,20 @@ class _FormTurno(ctk.CTkToplevel):
 
         fecha_hora = fecha_txt + " " + hora_txt
         cli_id = self._clientes_map[nombre_cli]
-        emp_id = self._empleadas_map[nombre_emp]
 
         if self._es_edicion:
             ok, msg = self._turno_service.actualizar(
-                self._turno["id"], cli_id, emp_id, servicios,
+                self._turno["id"], cli_id, servicios,
                 fecha_hora, self._var_estado.get(), notas)
             resultado = ok
         else:
             ok, msg, resultado = self._turno_service.crear(
-                cli_id, emp_id, servicios, fecha_hora, notas)
+                cli_id, servicios, fecha_hora, notas)
 
         if not ok and resultado == -1:
             if confirmar("Turno solapado", msg):
                 ok, msg, resultado = self._turno_service.crear(
-                    cli_id, emp_id, servicios, fecha_hora, notas, forzar=True)
+                    cli_id, servicios, fecha_hora, notas, forzar=True)
             else:
                 return
 

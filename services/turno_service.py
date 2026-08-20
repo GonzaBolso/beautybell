@@ -32,19 +32,21 @@ class TurnoService:
     #  Crear / editar                                                      #
     # ------------------------------------------------------------------ #
 
-    def crear(self, cliente_id: int, empleada_id: int,
-              servicios: list,           # [{servicio_id, precio}, ...]
+    def crear(self, cliente_id: int,
+              servicios: list,           # [{servicio_id, precio, empleada_id}, ...]
               fecha_hora: str, notas: str = "",
               forzar: bool = False) -> tuple[bool, str, int | None]:
         """
-        servicios: lista de dicts {servicio_id, precio}.
-        El primer servicio se usa como referencia para la duracion en la validacion.
+        servicios: lista de dicts {servicio_id, precio, empleada_id}, uno por cada
+        servicio del turno (puede haber varias empleadas distintas).
+        La primera empleada/servicio de la lista se usan como campos legacy de turnos.
         """
         if not servicios:
             return False, "Debes agregar al menos un servicio.", None
 
+        empleada_id = servicios[0]["empleada_id"]
         primer_srv_id = servicios[0]["servicio_id"]
-        ok, msg, solapamiento = self._validar(empleada_id, primer_srv_id, fecha_hora)
+        ok, msg, solapamiento = self._validar(servicios, fecha_hora)
         if not ok:
             if solapamiento and not forzar:
                 return False, msg, -1
@@ -55,7 +57,7 @@ class TurnoService:
 
         turno_id = self._repo.crear(
             cliente_id=cliente_id,
-            empleada_id=empleada_id,
+            empleada_id=empleada_id,     # campo legacy
             servicio_id=primer_srv_id,   # campo legacy
             fecha_hora=fecha_hora,
             notas=notas
@@ -63,8 +65,8 @@ class TurnoService:
         self._repo.guardar_servicios(turno_id, servicios)
         return True, "Turno creado correctamente.", turno_id
 
-    def actualizar(self, id: int, cliente_id: int, empleada_id: int,
-                   servicios: list,       # [{servicio_id, precio}, ...]
+    def actualizar(self, id: int, cliente_id: int,
+                   servicios: list,       # [{servicio_id, precio, empleada_id}, ...]
                    fecha_hora: str, estado: str, notas: str = "",
                    forzar: bool = False) -> tuple[bool, str]:
         if estado not in self.ESTADOS:
@@ -72,8 +74,9 @@ class TurnoService:
         if not servicios:
             return False, "Debes agregar al menos un servicio."
 
+        empleada_id = servicios[0]["empleada_id"]
         primer_srv_id = servicios[0]["servicio_id"]
-        ok, msg, solapamiento = self._validar(empleada_id, primer_srv_id, fecha_hora, excluir_id=id)
+        ok, msg, solapamiento = self._validar(servicios, fecha_hora, excluir_id=id)
         if not ok:
             if solapamiento and not forzar:
                 return False, msg
@@ -103,30 +106,40 @@ class TurnoService:
     #  Validaciones internas                                               #
     # ------------------------------------------------------------------ #
 
-    def _validar(self, empleada_id: int, servicio_id: int,
-                 fecha_hora: str, excluir_id: int = None) -> tuple[bool, str, bool]:
+    def _validar(self, servicios: list, fecha_hora: str,
+                 excluir_id: int = None) -> tuple[bool, str, bool]:
         try:
             datetime.strptime(fecha_hora, "%Y-%m-%d %H:%M")
         except ValueError:
             return False, "Formato de fecha inválido. Usar 'YYYY-MM-DD HH:MM'.", False
 
-        servicio = self._servicio_repo.obtener_por_id(servicio_id)
-        if not servicio:
-            return False, "El servicio seleccionado no existe.", False
+        # Una empleada por servicio; se valida el solapamiento por cada empleada
+        # distinta del turno, usando el primer servicio que se le asigno para
+        # estimar la duracion (misma simplificacion que antes, ahora por empleada).
+        primer_servicio_por_empleada = {}
+        for srv in servicios:
+            emp_id = srv["empleada_id"]
+            if emp_id not in primer_servicio_por_empleada:
+                primer_servicio_por_empleada[emp_id] = srv["servicio_id"]
 
-        duracion = servicio["duracion_min"]
+        for emp_id, servicio_id in primer_servicio_por_empleada.items():
+            servicio = self._servicio_repo.obtener_por_id(servicio_id)
+            if not servicio:
+                return False, "El servicio seleccionado no existe.", False
 
-        solapados = self._repo.obtener_solapados(
-            empleada_id=empleada_id,
-            fecha_hora=fecha_hora,
-            duracion_min=duracion,
-            excluir_id=excluir_id
-        )
-        if solapados:
-            conflicto = solapados[0]
-            return False, (
-                f"Ya hay un turno a las {conflicto['fecha_hora'][11:16]}. "
-                f"¿Querés agendarlo igual?"
-            ), True
+            duracion = servicio["duracion_min"]
+
+            solapados = self._repo.obtener_solapados(
+                empleada_id=emp_id,
+                fecha_hora=fecha_hora,
+                duracion_min=duracion,
+                excluir_id=excluir_id
+            )
+            if solapados:
+                conflicto = solapados[0]
+                return False, (
+                    f"Ya hay un turno a las {conflicto['fecha_hora'][11:16]}. "
+                    f"¿Querés agendarlo igual?"
+                ), True
 
         return True, "", False

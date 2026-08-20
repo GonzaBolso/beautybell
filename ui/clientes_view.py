@@ -224,7 +224,24 @@ class ClientesView(VistaBase):
                 )
                 badge.pack(side="right")
 
-                ctk.CTkLabel(info, text=t["empleada_nombre"],
+                servicios_turno = repo.obtener_servicios_de_turno(t["id"])
+                if servicios_turno:
+                    grupos_por_empleada = {}
+                    orden_empleadas = []
+                    for s in servicios_turno:
+                        nombre_emp = s.get("empleada_nombre") or t["empleada_nombre"]
+                        if nombre_emp not in grupos_por_empleada:
+                            grupos_por_empleada[nombre_emp] = []
+                            orden_empleadas.append(nombre_emp)
+                        grupos_por_empleada[nombre_emp].append(s["servicio_nombre"])
+                    texto_emp = "  |  ".join(
+                        nombre_emp + ": " + ", ".join(grupos_por_empleada[nombre_emp])
+                        for nombre_emp in orden_empleadas
+                    )
+                else:
+                    texto_emp = t["empleada_nombre"]
+
+                ctk.CTkLabel(info, text=texto_emp,
                              font=FUENTES["small"],
                              text_color=COLORES["texto_suave"],
                              anchor="w").pack(fill="x")

@@ -157,6 +157,8 @@ def _migraciones(conn: sqlite3.Connection):
             servicio_id INTEGER NOT NULL REFERENCES servicios(id),
             precio      REAL    NOT NULL DEFAULT 0
         )""",),
+        # Cada servicio del turno puede pertenecer a una empleada distinta
+        ("ALTER TABLE turno_servicios ADD COLUMN empleada_id INTEGER REFERENCES empleadas(id)",),
     ]
     for (sql,) in migraciones:
         try:
@@ -168,7 +170,7 @@ def _migraciones(conn: sqlite3.Connection):
     # Migrar turnos existentes a turno_servicios si aun no tienen entradas
     try:
         rows = conn.execute(
-            """SELECT t.id, t.servicio_id, s.precio
+            """SELECT t.id, t.servicio_id, t.empleada_id, s.precio
                FROM turnos t
                JOIN servicios s ON s.id = t.servicio_id
                WHERE t.servicio_id IS NOT NULL
@@ -178,10 +180,24 @@ def _migraciones(conn: sqlite3.Connection):
         ).fetchall()
         for row in rows:
             conn.execute(
-                "INSERT INTO turno_servicios (turno_id, servicio_id, precio) VALUES (?,?,?)",
-                (row["id"], row["servicio_id"], row["precio"])
+                "INSERT INTO turno_servicios (turno_id, servicio_id, empleada_id, precio) VALUES (?,?,?,?)",
+                (row["id"], row["servicio_id"], row["empleada_id"], row["precio"])
             )
         if rows:
+            conn.commit()
+    except Exception:
+        pass
+
+    # Completar empleada_id en filas viejas de turno_servicios con la empleada del turno
+    try:
+        cur = conn.execute(
+            """UPDATE turno_servicios
+               SET empleada_id = (
+                   SELECT empleada_id FROM turnos WHERE turnos.id = turno_servicios.turno_id
+               )
+               WHERE empleada_id IS NULL"""
+        )
+        if cur.rowcount:
             conn.commit()
     except Exception:
         pass
