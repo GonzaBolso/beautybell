@@ -862,7 +862,7 @@ class _SelectorFecha(ctk.CTkFrame):
         self._popup.overrideredirect(True)
         self._popup.wm_attributes("-topmost", True)
         self._popup.configure(fg_color=COLORES["fondo_card"])
-        self._popup.geometry(f"250x290+{x}+{y}")
+        self._popup.geometry(f"270x290+{x}+{y}")
 
         self._cal_container = ctk.CTkFrame(
             self._popup, fg_color="transparent",
@@ -917,7 +917,7 @@ class _SelectorFecha(ctk.CTkFrame):
         for fi, semana in enumerate(cal):
             for ci, num_dia in enumerate(semana):
                 if num_dia == 0:
-                    ctk.CTkLabel(grid, text="", height=28).grid(
+                    ctk.CTkLabel(grid, text="", width=32, height=28).grid(
                         row=fi, column=ci, padx=1, pady=1)
                     continue
 
@@ -933,8 +933,8 @@ class _SelectorFecha(ctk.CTkFrame):
                     fg, tc = "transparent", COLORES["texto"]
 
                 lbl = ctk.CTkLabel(
-                    grid, text=str(num_dia), height=28, fg_color=fg, text_color=tc,
-                    corner_radius=14, font=FUENTES["small"], cursor="hand2",
+                    grid, text=str(num_dia), width=32, height=28, fg_color=fg, text_color=tc,
+                    corner_radius=8, font=FUENTES["small"], cursor="hand2",
                 )
                 lbl.grid(row=fi, column=ci, sticky="ew", padx=1, pady=1)
                 lbl.bind("<Button-1>", lambda _e, fd=fecha_dia: self._elegir(fd))

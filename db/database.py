@@ -19,6 +19,18 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def crear_backup(destino_path: str):
+    """Copia la base de datos completa a `destino_path` usando el backup API
+    de sqlite3 (seguro aunque haya una conexión abierta en ese momento)."""
+    origen = sqlite3.connect(DB_PATH)
+    destino = sqlite3.connect(destino_path)
+    try:
+        origen.backup(destino)
+    finally:
+        destino.close()
+        origen.close()
+
+
 def inicializar_db():
     conn = get_connection()
     try:

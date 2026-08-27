@@ -29,6 +29,10 @@ class CajaView(VistaBase):
         self.contenido.rowconfigure(2, weight=1)
 
         boton_secundario(
+            self._acciones, "💾  Backup",
+            comando=self._backup, ancho=130
+        ).pack(side="right", padx=(8, 0))
+        boton_secundario(
             self._acciones, "⬇  Exportar Excel",
             comando=self._exportar, ancho=160
         ).pack(side="right", padx=(8, 0))
@@ -258,6 +262,29 @@ class CajaView(VistaBase):
             fecha_default=self._fecha_desde, al_guardar=self._cargar,
             movimiento=mov,
         )
+
+    def _backup(self):
+        import tkinter.filedialog as fd
+        import tkinter.messagebox as mb
+        from datetime import datetime
+        import os
+        from db.database import crear_backup
+
+        carpeta = fd.askdirectory(title="Elegir carpeta para guardar el backup")
+        if not carpeta:
+            return
+        try:
+            nombre = "BeautyBel_Backup_" + datetime.now().strftime("%Y-%m-%d_%H%M") + ".db"
+            ruta = os.path.normpath(os.path.join(carpeta, nombre))
+            crear_backup(ruta)
+            if mb.askyesno("Backup guardado", "Archivo guardado en: " + ruta + "\n\nAbrir carpeta?"):
+                import subprocess
+                if os.name == "nt":
+                    subprocess.Popen(["explorer", "/select,", ruta])
+                else:
+                    subprocess.Popen(["open", os.path.dirname(ruta)])
+        except Exception as e:
+            mb.showerror("Error al hacer backup", str(e))
 
     def _exportar(self):
         import tkinter.filedialog as fd
