@@ -26,8 +26,10 @@ class VistaBase(ctk.CTkFrame):
 
         etiqueta(cab, self._titulo, fuente="titulo").pack(side="left")
 
-        # Zona para botones de acción en la cabecera (subclases pueden usarla)
-        self._acciones = ctk.CTkFrame(cab, fg_color="transparent")
+        # Zona para botones de acción en la cabecera (subclases pueden usarla).
+        # Alto fijo: si queda vacía (ninguna vista agrega un botón), CTkFrame
+        # por defecto pide 200px de alto y "infla" toda la cabecera.
+        self._acciones = ctk.CTkFrame(cab, fg_color="transparent", height=36)
         self._acciones.pack(side="right")
 
         separador(self, orientacion="horizontal").pack(fill="x", padx=24, pady=(8, 0))

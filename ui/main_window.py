@@ -22,6 +22,7 @@ class MainWindow(ctk.CTk):
         ("proveedores",  "Proveedores",  "📦"),
         ("configuracion","Configuración","⚙️"),
         ("precios",      "Precios",      "🏷️"),  # <-- nuevo módulo
+        ("historial_clientas", "Historial Clientas", "📋"),
     ]
 
     def __init__(self):
@@ -204,6 +205,10 @@ class MainWindow(ctk.CTk):
             elif clave == "precios":
                 from ui.precios_view import PreciosView
                 return PreciosView(self.area_contenido)
+
+            elif clave == "historial_clientas":
+                from ui.historial_clientas_view import HistorialClientasView
+                return HistorialClientasView(self.area_contenido)
 
         except Exception as e:
             # Si la vista aún no está implementada, mostrar placeholder

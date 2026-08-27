@@ -142,6 +142,14 @@ def _crear_tablas(conn: sqlite3.Connection):
             activo      INTEGER NOT NULL DEFAULT 1
         );
 
+        CREATE TABLE IF NOT EXISTS historial_clientas (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente_id  INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+            tipo        TEXT    NOT NULL,
+            descripcion TEXT    NOT NULL,
+            fecha       TEXT    NOT NULL DEFAULT (date('now'))
+        );
+
     """)
 
 

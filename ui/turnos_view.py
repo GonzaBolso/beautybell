@@ -6,7 +6,7 @@ from ui.tema import COLORES, FUENTES
 from ui.widgets import (
     boton_primario, boton_secundario, boton_peligro,
     campo_texto, etiqueta, etiqueta_suave, card,
-    separador, mostrar_error, mostrar_exito, confirmar
+    separador, selector, mostrar_error, mostrar_exito, confirmar
 )
 from services.turno_service import TurnoService
 from services.caja_service import CajaService
@@ -810,6 +810,206 @@ class _BuscadorConDropdown(ctk.CTkFrame):
 
 
 # ------------------------------------------------------------------ #
+#  Selector de fecha (calendario emergente) y de hora (dropdowns)      #
+# ------------------------------------------------------------------ #
+
+_MESES_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+             "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+
+
+class _SelectorFecha(ctk.CTkFrame):
+    """Botón que muestra la fecha elegida y abre un mini calendario emergente
+    para seleccionarla con el mouse, en vez de escribirla a mano."""
+
+    def __init__(self, parent, fecha_inicial: date, ancho=170, **kwargs):
+        super().__init__(parent, fg_color="transparent", corner_radius=0)
+        self._fecha = fecha_inicial
+        self._mes_actual = fecha_inicial.replace(day=1)
+        self._popup = None
+
+        self._boton = ctk.CTkButton(
+            self, text=self._texto(), anchor="w",
+            width=ancho, height=36,
+            fg_color=COLORES["fondo_input"],
+            hover_color=COLORES["rosa_suave"],
+            text_color=COLORES["texto"],
+            border_color=COLORES["borde"], border_width=1,
+            font=FUENTES["normal"], corner_radius=8,
+            command=self._abrir_popup,
+        )
+        self._boton.pack()
+
+    def _texto(self) -> str:
+        return "📅  " + self._fecha.strftime("%Y-%m-%d")
+
+    def get(self) -> str:
+        return self._fecha.strftime("%Y-%m-%d")
+
+    def set_date(self, fecha: date):
+        self._fecha = fecha
+        self._mes_actual = fecha.replace(day=1)
+        self._boton.configure(text=self._texto())
+
+    def _abrir_popup(self):
+        self._cerrar_popup()
+        root = self._boton.winfo_toplevel()
+        self._boton.update_idletasks()
+        x = self._boton.winfo_rootx()
+        y = self._boton.winfo_rooty() + self._boton.winfo_height() + 2
+
+        self._popup = ctk.CTkToplevel(root)
+        self._popup.withdraw()
+        self._popup.overrideredirect(True)
+        self._popup.wm_attributes("-topmost", True)
+        self._popup.configure(fg_color=COLORES["fondo_card"])
+        self._popup.geometry(f"250x290+{x}+{y}")
+
+        self._cal_container = ctk.CTkFrame(
+            self._popup, fg_color="transparent",
+            border_width=1, border_color=COLORES["borde"],
+        )
+        self._cal_container.pack(fill="both", expand=True)
+        self._render_calendario()
+
+        self._popup.deiconify()
+        self._popup.lift()
+        self._popup.bind("<FocusOut>", lambda _: self.after(150, self._cerrar_popup))
+        self._popup.focus_force()
+
+    def _render_calendario(self):
+        for w in self._cal_container.winfo_children():
+            w.destroy()
+
+        nav = ctk.CTkFrame(self._cal_container, fg_color="transparent")
+        nav.pack(fill="x", padx=8, pady=(8, 4))
+        nav.columnconfigure(1, weight=1)
+
+        ctk.CTkButton(nav, text="<", width=28, height=28,
+                      fg_color="transparent", hover_color=COLORES["rosa_suave"],
+                      text_color=COLORES["rosa"], corner_radius=8,
+                      command=self._mes_anterior).grid(row=0, column=0)
+
+        ctk.CTkLabel(
+            nav, text=_MESES_ES[self._mes_actual.month - 1] + " " + str(self._mes_actual.year),
+            font=FUENTES["subtitulo"], text_color=COLORES["texto"],
+        ).grid(row=0, column=1)
+
+        ctk.CTkButton(nav, text=">", width=28, height=28,
+                      fg_color="transparent", hover_color=COLORES["rosa_suave"],
+                      text_color=COLORES["rosa"], corner_radius=8,
+                      command=self._mes_siguiente).grid(row=0, column=2)
+
+        cab = ctk.CTkFrame(self._cal_container, fg_color="transparent")
+        cab.pack(fill="x", padx=8)
+        for i in range(7):
+            cab.columnconfigure(i, weight=1)
+        for i, d in enumerate(["Lu", "Ma", "Mi", "Ju", "Vi", "Sa", "Do"]):
+            ctk.CTkLabel(cab, text=d, height=20, font=FUENTES["small"],
+                         text_color=COLORES["texto_suave"]).grid(row=0, column=i)
+
+        grid = ctk.CTkFrame(self._cal_container, fg_color="transparent")
+        grid.pack(fill="x", padx=8, pady=(0, 8))
+        for i in range(7):
+            grid.columnconfigure(i, weight=1)
+
+        cal = calendar.monthcalendar(self._mes_actual.year, self._mes_actual.month)
+        hoy = date.today()
+        for fi, semana in enumerate(cal):
+            for ci, num_dia in enumerate(semana):
+                if num_dia == 0:
+                    ctk.CTkLabel(grid, text="", height=28).grid(
+                        row=fi, column=ci, padx=1, pady=1)
+                    continue
+
+                fecha_dia = date(self._mes_actual.year, self._mes_actual.month, num_dia)
+                es_sel = fecha_dia == self._fecha
+                es_hoy = fecha_dia == hoy
+
+                if es_sel:
+                    fg, tc = COLORES["rosa"], COLORES["texto_blanco"]
+                elif es_hoy:
+                    fg, tc = COLORES["rosa_suave"], COLORES["rosa"]
+                else:
+                    fg, tc = "transparent", COLORES["texto"]
+
+                lbl = ctk.CTkLabel(
+                    grid, text=str(num_dia), height=28, fg_color=fg, text_color=tc,
+                    corner_radius=14, font=FUENTES["small"], cursor="hand2",
+                )
+                lbl.grid(row=fi, column=ci, sticky="ew", padx=1, pady=1)
+                lbl.bind("<Button-1>", lambda _e, fd=fecha_dia: self._elegir(fd))
+
+        ctk.CTkButton(
+            self._cal_container, text="Hoy", height=28,
+            fg_color="transparent", hover_color=COLORES["rosa_suave"],
+            text_color=COLORES["rosa"], border_width=1, border_color=COLORES["rosa"],
+            corner_radius=8, command=lambda: self._elegir(date.today()),
+        ).pack(pady=(0, 8))
+
+    def _elegir(self, fecha_dia: date):
+        self.set_date(fecha_dia)
+        self._cerrar_popup()
+
+    def _mes_anterior(self):
+        if self._mes_actual.month == 1:
+            self._mes_actual = self._mes_actual.replace(year=self._mes_actual.year - 1, month=12)
+        else:
+            self._mes_actual = self._mes_actual.replace(month=self._mes_actual.month - 1)
+        self._render_calendario()
+
+    def _mes_siguiente(self):
+        if self._mes_actual.month == 12:
+            self._mes_actual = self._mes_actual.replace(year=self._mes_actual.year + 1, month=1)
+        else:
+            self._mes_actual = self._mes_actual.replace(month=self._mes_actual.month + 1)
+        self._render_calendario()
+
+    def _cerrar_popup(self):
+        if self._popup:
+            try:
+                self._popup.destroy()
+            except Exception:
+                pass
+            self._popup = None
+
+
+class _SelectorHora(ctk.CTkFrame):
+    """Hora y minuto elegibles con dos desplegables, en vez de un campo de texto libre."""
+
+    def __init__(self, parent, hora_inicial="10:30", **kwargs):
+        super().__init__(parent, fg_color="transparent", corner_radius=0)
+
+        h_str, m_str = hora_inicial.split(":")
+
+        horas = [f"{h:02d}" for h in range(24)]
+        if h_str not in horas:
+            horas = sorted(set(horas) | {h_str})
+
+        minutos = [f"{m:02d}" for m in range(0, 60, 5)]
+        if m_str not in minutos:
+            minutos = sorted(set(minutos) | {m_str})
+
+        sel_h, self._var_h = selector(self, valores=horas, ancho=64)
+        self._var_h.set(h_str)
+        sel_h.pack(side="left")
+
+        ctk.CTkLabel(self, text=":", font=FUENTES["subtitulo"],
+                     text_color=COLORES["texto"]).pack(side="left", padx=4)
+
+        sel_m, self._var_m = selector(self, valores=minutos, ancho=64)
+        self._var_m.set(m_str)
+        sel_m.pack(side="left")
+
+    def get(self) -> str:
+        return self._var_h.get() + ":" + self._var_m.get()
+
+    def set(self, hhmm: str):
+        h, m = hhmm.split(":")
+        self._var_h.set(h)
+        self._var_m.set(m)
+
+
+# ------------------------------------------------------------------ #
 #  Formulario turno                                                    #
 # ------------------------------------------------------------------ #
 
@@ -900,18 +1100,15 @@ class _FormTurno(ctk.CTkToplevel):
         )
         self._lbl_total.pack(anchor="w", padx=28, pady=(4, 0))
 
-        etiqueta_suave(self._scroll, "Fecha (YYYY-MM-DD)").pack(anchor="w", padx=28, pady=(8, 2))
+        etiqueta_suave(self._scroll, "Fecha y hora").pack(anchor="w", padx=28, pady=(8, 2))
         fila_dt = ctk.CTkFrame(self._scroll, fg_color="transparent")
         fila_dt.pack(**pad)
 
-        self._fecha = campo_texto(fila_dt, ancho=230)
-        self._fecha.insert(0, self._fecha_inicial.strftime("%Y-%m-%d"))
+        self._fecha = _SelectorFecha(fila_dt, fecha_inicial=self._fecha_inicial)
         self._fecha.pack(side="left")
 
-        etiqueta_suave(fila_dt, "Hora (HH:MM)").pack(side="left", padx=(16, 6))
-        self._hora = campo_texto(fila_dt, ancho=100)
-        self._hora.insert(0, "10:30")
-        self._hora.pack(side="left")
+        self._hora = _SelectorHora(fila_dt, hora_inicial="10:30")
+        self._hora.pack(side="left", padx=(16, 0))
 
         self._var_estado = ctk.StringVar(value="pendiente")
         if self._es_edicion:
@@ -1117,10 +1314,8 @@ class _FormTurno(ctk.CTkToplevel):
                 self._agregar_fila_servicio(grupo, nombre_srv, int(s["precio"]))
 
         fh = t["fecha_hora"]
-        self._fecha.delete(0, "end")
-        self._fecha.insert(0, fh[:10])
-        self._hora.delete(0, "end")
-        self._hora.insert(0, fh[11:16])
+        self._fecha.set_date(datetime.strptime(fh[:10], "%Y-%m-%d").date())
+        self._hora.set(fh[11:16])
         self._var_estado.set(t["estado"])
         if t["notas"]:
             self._notas.delete("1.0", "end")
@@ -1128,15 +1323,12 @@ class _FormTurno(ctk.CTkToplevel):
 
     def _guardar(self):
         nombre_cli = self._buscador_cli.get().strip()
-        fecha_txt  = self._fecha.get().strip()
-        hora_txt   = self._hora.get().strip()
+        fecha_txt  = self._fecha.get()
+        hora_txt   = self._hora.get()
         notas      = self._notas.get("1.0", "end").strip()
 
         if not nombre_cli or nombre_cli not in self._clientes_map:
             mostrar_error("Error", "Selecciona un cliente valido.")
-            return
-        if not hora_txt:
-            mostrar_error("Error", "Ingresa la hora (HH:MM).")
             return
         if not self._grupos_empleados:
             mostrar_error("Error", "Agrega al menos un empleado con sus servicios.")

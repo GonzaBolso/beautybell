@@ -1,88 +1,108 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Este archivo le da contexto a Claude Code (claude.ai/code) al trabajar en este repositorio.
 
-## What this is
+## Qué es esto
 
-BeautyBel is a Windows desktop app (Tkinter/customtkinter) for managing a beauty
-salon: turnos (appointments), clientes, caja (cash register), proveedores/productos
-(suppliers/inventory), and a price list. Single-user, local SQLite database, packaged
-with PyInstaller into a standalone `.exe`.
+BeautyBel es una app de escritorio para Windows (Tkinter/customtkinter) para gestionar
+una peluquería/salón de belleza: turnos, clientes, caja, proveedores/productos
+(insumos/inventario), una lista de precios y el historial de clientas. Un solo usuario,
+base de datos SQLite local, empaquetada con PyInstaller en un `.exe` independiente.
 
-## Commands
+## Comandos
 
 ```bash
-# Install dependencies (venv already at .venv/)
+# Instalar dependencias (el venv ya está en .venv/)
 ./.venv/Scripts/python.exe -m pip install -r requirements.txt
 
-# Run the app
+# Correr la app
 ./.venv/Scripts/python.exe main.py
 
-# Build the Windows executable (see beautybel.spec)
+# Compilar el ejecutable de Windows (ver beautybel.spec)
 pyinstaller beautybel.spec
 ```
 
-There is no test suite and no linter configured in this repo. When verifying changes,
-either run the app manually or write a throwaway script that points
-`db.database.DB_PATH` at a temp file, calls `inicializar_db()`, and exercises the
-repo/service layer directly (avoids touching the real `beautybel.db`).
+No hay suite de tests ni linter configurado en este repo. Para verificar cambios,
+corré la app manualmente o escribí un script descartable que apunte
+`db.database.DB_PATH` a un archivo temporal, llame a `inicializar_db()`, y ejercite
+la capa de repository/service directamente (así no se toca el `beautybel.db` real).
 
-## Architecture
+## Arquitectura
 
-Three layers, each only talking to the one below it:
+Tres capas, cada una hablando solo con la que está debajo:
 
 ```
 ui/*_view.py  →  services/*_service.py  →  repository/*_repo.py  →  db/database.py (SQLite)
 ```
 
-- **`db/database.py`** — single source of schema truth. `inicializar_db()` (called
-  once from `MainWindow.__init__`) runs `_crear_tablas()` (idempotent `CREATE TABLE IF
-  NOT EXISTS`), then `_migraciones()`, then `_cargar_seeds()`. There are no separate
-  migration files/versioning: schema changes are additive `ALTER TABLE` statements
-  appended to the `_migraciones()` list, each wrapped in try/except so re-running is
-  safe on both fresh and existing databases. One-off data backfills (e.g. populating a
-  new column from an existing one) are also written directly in `_migraciones()`.
-  `DB_PATH` resolves next to the `.exe` when frozen (`sys._MEIPASS`) or to the project
-  root in dev.
-- **`repository/*_repo.py`** — one repo per table/entity, all inheriting `BaseRepo`
-  (`repository/base_repo.py`) for its `_ejecutar` / `_uno` / `_todos` / `_ultimo_id`
-  helpers. Repos hold raw SQL only, no business rules.
-- **`services/*_service.py`** — validation and business rules (e.g. `TurnoService`
-  validates overlapping appointments per empleada, `CajaService` handles multi-method
-  payments). Views never call repos directly.
-- **`ui/*_view.py`** — one file per sidebar module (`turnos`, `clientes`, `caja`,
-  `proveedores`, `configuracion`, `precios`), registered in `MainWindow.MODULOS`
-  (`ui/main_window.py`) and lazily imported in `_crear_vista`. Every view subclasses
-  `VistaBase` (`ui/vista_base.py`), which provides the title header and a `.contenido`
-  frame; views override `_construir_contenido()`. Shared widget factories
-  (`boton_primario`, `campo_texto`, `card`, `mostrar_error`, `confirmar`, etc.) live in
-  `ui/widgets.py`; colors/fonts come from `ui/tema.py` (`COLORES`, `FUENTES`) — always
-  reuse these instead of hardcoding hex colors or fonts in a view.
+- **`db/database.py`** — única fuente de verdad del schema. `inicializar_db()`
+  (llamada una vez desde `MainWindow.__init__`) ejecuta `_crear_tablas()` (`CREATE
+  TABLE IF NOT EXISTS`, idempotente), luego `_migraciones()`, y después
+  `_cargar_seeds()`. No hay archivos de migración separados ni versionado: los
+  cambios de schema son sentencias `ALTER TABLE` aditivas agregadas a la lista de
+  `_migraciones()`, cada una envuelta en try/except para que volver a correrlas sea
+  seguro tanto en bases de datos nuevas como existentes. Los backfills de datos
+  puntuales (por ejemplo, poblar una columna nueva a partir de una existente) también
+  se escriben directamente en `_migraciones()`. `DB_PATH` resuelve al lado del `.exe`
+  cuando está empaquetado (`sys._MEIPASS`) o a la raíz del proyecto en desarrollo.
+- **`repository/*_repo.py`** — un repo por tabla/entidad, todos heredando de
+  `BaseRepo` (`repository/base_repo.py`) para sus helpers `_ejecutar` / `_uno` /
+  `_todos` / `_ultimo_id`. Los repos solo contienen SQL crudo, sin reglas de negocio.
+- **`services/*_service.py`** — validaciones y reglas de negocio (por ejemplo,
+  `TurnoService` valida turnos superpuestos por empleada, `CajaService` maneja pagos
+  con múltiples métodos). Las vistas nunca llaman a los repos directamente.
+- **`ui/*_view.py`** — un archivo por módulo del sidebar (`turnos`, `clientes`,
+  `caja`, `proveedores`, `configuracion`, `precios`, `historial_clientas`),
+  registrado en `MainWindow.MODULOS` (`ui/main_window.py`) e importado de forma
+  perezosa (lazy) en `_crear_vista`. Cada vista hereda de `VistaBase`
+  (`ui/vista_base.py`), que provee el encabezado con título y un frame `.contenido`;
+  las vistas sobreescriben `_construir_contenido()`. Las fábricas de widgets
+  compartidas (`boton_primario`, `campo_texto`, `card`, `mostrar_error`, `confirmar`,
+  etc.) viven en `ui/widgets.py`; los colores/fuentes vienen de `ui/tema.py`
+  (`COLORES`, `FUENTES`) — siempre hay que reusar esto en vez de poner colores hex o
+  fuentes hardcodeadas en una vista.
 
-### Turnos (appointments) — the most involved module
+### Turnos — el módulo más complejo
 
-A turno belongs to one cliente but can have **multiple empleadas, each with their own
-set of servicios**. This is modeled as a flat list of service lines
-(`turno_servicios`: `turno_id, servicio_id, empleada_id, precio`), not a nested
-structure — grouping by empleada happens in Python (view and repo layers), not SQL.
-`turnos.empleada_id` / `turnos.servicio_id` still exist as legacy convenience columns
-(auto-filled from the *first* service line) so older joins keep working; don't add new
-logic that reads them as the source of truth — use `turno["servicios"]`
-(`TurnoRepo.obtener_servicios_de_turno` / `_enriquecer_con_servicios`) instead.
+Un turno pertenece a una sola cliente pero puede tener **múltiples empleadas, cada
+una con su propio conjunto de servicios**. Esto se modela como una lista plana de
+líneas de servicio (`turno_servicios`: `turno_id, servicio_id, empleada_id, precio`),
+no como una estructura anidada — el agrupamiento por empleada pasa en Python (capas
+de vista y repo), no en SQL. `turnos.empleada_id` / `turnos.servicio_id` todavía
+existen como columnas de conveniencia legacy (autocompletadas con la *primera* línea
+de servicio) para que los joins viejos sigan funcionando; no agregues lógica nueva
+que las lea como fuente de verdad — usá `turno["servicios"]`
+(`TurnoRepo.obtener_servicios_de_turno` / `_enriquecer_con_servicios`) en su lugar.
 
-Overlap validation (`TurnoService._validar`) checks solapamiento **per empleada**
-independently — two different empleadas can have services at the same `fecha_hora` on
-the same turno, but the same empleada can't be double-booked across turnos.
+La validación de superposición (`TurnoService._validar`) chequea el solapamiento
+**por empleada** de forma independiente — dos empleadas distintas pueden tener
+servicios en el mismo `fecha_hora` en el mismo turno, pero la misma empleada no puede
+tener doble reserva entre turnos.
 
-`ui/turnos_view.py::_FormTurno` renders one card per empleada (`_grupos_empleados`),
-each with its own service rows and subtotal; `_TarjetaTurno` and `_DialogCobro` group
-`turno["servicios"]` by `empleada_nombre` for display, and the cobro description
-("Cobro: Cliente - Servicios - Empleadas") is parsed positionally by
-`services/excel_export.py` — keep that " - "-joined format if you touch it.
+`ui/turnos_view.py::_FormTurno` renderiza una tarjeta por empleada
+(`_grupos_empleados`), cada una con sus propias filas de servicio y subtotal;
+`_TarjetaTurno` y `_DialogCobro` agrupan `turno["servicios"]` por `empleada_nombre`
+para mostrarlos, y la descripción del cobro ("Cobro: Cliente - Servicios -
+Empleadas") es parseada posicionalmente por `services/excel_export.py` — si tocás
+eso, mantené ese formato unido por " - ".
 
-### Packaging
+### Historial Clientas
 
-`resource_path()` (duplicated in `Utils.py` and `ui/main_window.py`) resolves asset
-paths (`assets/`) both in dev and when frozen via PyInstaller (`sys._MEIPASS`). Any
-new asset file must be added to `datas=[...]` in `beautybel.spec` or it won't ship in
-the built `.exe`.
+Cada fila de `historial_clientas` (`cliente_id, tipo, descripcion, fecha`) es **un
+item individual**, no un registro por día: si en una misma visita se le hacen varios
+servicios a la clienta (por ejemplo Color + Corte + Progresivo), se crea una fila por
+cada tipo, cada una con su propia descripción libre, todas con la misma `fecha`
+(default `date('now')`). `tipo` está restringido en `HistorialService.TIPOS`
+(`Color`, `Baño Color`, `Corte`, `Progresivo`, `Tratamientos`) — no es una tabla
+libre, así que si se agrega un tipo nuevo hay que sumarlo ahí.
+`ui/historial_clientas_view.py` tiene dos formularios distintos: `_construir_form_multiple`
+(alta, con checkbox + descripción por cada tipo, para cargar varios items de una
+vez) y `_construir_form_edicion` (un solo tipo + descripción, para corregir un item
+ya creado desde la lista).
+
+### Empaquetado
+
+`resource_path()` (duplicada en `Utils.py` y `ui/main_window.py`) resuelve las rutas
+de assets (`assets/`) tanto en desarrollo como empaquetada con PyInstaller
+(`sys._MEIPASS`). Cualquier asset nuevo tiene que agregarse a `datas=[...]` en
+`beautybel.spec` o no se va a incluir en el `.exe` compilado.
