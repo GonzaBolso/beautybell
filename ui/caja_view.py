@@ -354,7 +354,7 @@ class _CalendarioPopup(ctk.CTkToplevel):
         self.resizable(False, False)
 
         self._construir()
-        self.bind("<FocusOut>", lambda _: self._cerrar())
+        self.bind("<FocusOut>", self._al_perder_foco)
         self.after(50, lambda: self.focus_force())
 
     def _construir(self):
@@ -461,6 +461,22 @@ class _CalendarioPopup(ctk.CTkToplevel):
     def _elegir(self, fecha: date):
         self._seleccionada = fecha
         self._al_seleccionar(fecha)
+        self._cerrar()
+
+    def _al_perder_foco(self, event):
+        # Un click en un boton interno (< / >) tambien dispara FocusOut sobre
+        # este Toplevel. Esperamos a que el foco se asiente y solo cerramos
+        # si terminó afuera del popup; si no, el click interno se cerraría
+        # el popup antes de que el boton llegue a ejecutar su comando.
+        self.after(10, self._cerrar_si_foco_salio)
+
+    def _cerrar_si_foco_salio(self):
+        try:
+            foco = self.focus_get()
+        except Exception:
+            foco = None
+        if foco is not None and str(foco).startswith(str(self)):
+            return
         self._cerrar()
 
     def _cerrar(self):
